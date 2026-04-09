@@ -8,18 +8,16 @@ const SETTINGS_KEY = "fabSheet";
 
 const DEFAULT_SCHEMA = [
   { name: "시공간", columns: ["날짜", "시간", "위치", "등장인물"] },
-  { name: "캐릭터", columns: ["인물", "신체", "성격", "기타"] },
+  { name: "캐릭터", columns: ["인물", "능력치", "외형", "성격", "기타"] },
   { name: "관계", columns: ["인물", "대상", "관계", "상세"] },
-  { name: "특성/마법", columns: ["인물", "이름", "유형", "상세"] },
+  { name: "특성/마법", columns: ["인물", "분류", "계열", "유형", "이름", "상세"] },
   { name: "소지품", columns: ["인물", "아이템", "상세", "효과"] },
-  { name: "스토리라인", columns: ["인물", "유형", "내용", "위치", "기간", "상태"] },
+  { name: "스토리라인", columns: ["인물", "유형", "내용", "위치", "상태"] },
 ];
 
 const DEFAULT_COLORS = { accent: "#6c5ce7" };
 
-// ============================================================
-// SETTINGS
-// ============================================================
+// ── SETTINGS ──
 
 function getSettings() {
   if (!extension_settings[SETTINGS_KEY]) {
@@ -50,23 +48,20 @@ function resetSchema() {
   saveSettings();
 }
 function applyColors() {
-  const c = getSettings().colors;
-  const hex = c.accent || "#6c5ce7";
+  const c = getSettings().colors; const hex = c.accent || "#6c5ce7";
   document.documentElement.style.setProperty("--fab-accent", hex);
-  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
   document.documentElement.style.setProperty("--fab-accent-rgb", `${r},${g},${b}`);
 }
 
-// ============================================================
-// DATA
-// ============================================================
+// ── DATA ──
 
 function buildEmpty() {
   const schema = getSchema(); const tables = {};
   for (let i = 0; i < schema.length; i++) tables[i] = { name: schema[i].name, columns: [...schema[i].columns], rows: [] };
   return tables;
 }
-function isRowEmpty(row, n) { for (let i = 0; i < n; i++) if ((row[i] || "").trim()) return false; return true; }
+function isRowEmpty(row, n) { for (let i = 0; i < n; i++) if ((row[i]||"").trim()) return false; return true; }
 function cleanRows(t) { if (t?.rows) t.rows = t.rows.filter(r => !isRowEmpty(r, t.columns.length)); }
 
 function getTables() {
@@ -97,34 +92,30 @@ function execInsert(ti, data) { const t = getTables()[ti]; if (!t) return; const
 function execDelete(ti, ri) { const t = getTables()[ti]; if (t?.rows[ri]) t.rows.splice(ri, 1); }
 function execUpdate(ti, ri, data) { const t = getTables()[ti]; if (!t?.rows[ri]) return; for (const [ci, val] of Object.entries(data)) t.rows[ri][+ci] = String(val); }
 
-// ============================================================
-// PARSER
-// ============================================================
+// ── PARSER ──
 
 function parseDataObj(str) { const d = {}; const re = /(\d+)\s*:\s*(?:"([^"]*?)"|'([^']*?)'|([^\s,}]+))/g; let m; while ((m = re.exec(str))) d[+m[1]] = m[2] ?? m[3] ?? m[4] ?? ""; return d; }
 function parseEdits(text) {
   const ops = []; const re = /<tableEdit>([\s\S]*?)<\/tableEdit>|<!--\s*tableEdit\s*-->([\s\S]*?)<!--\s*\/tableEdit\s*-->/gi; let em;
   while ((em = re.exec(text))) {
-    const block = (em[1] || em[2] || "").replace(/<!--/g, "").replace(/-->/g, "");
+    const block = (em[1]||em[2]||"").replace(/<!--/g,"").replace(/-->/g,"");
     for (const line of block.split("\n")) {
       const t = line.trim(); if (!t || t.startsWith("//")) continue; let m;
-      if ((m = t.match(/insertRow\(\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type: "insert", ti: +m[1], data: parseDataObj(m[2]) });
-      else if ((m = t.match(/deleteRow\(\s*(\d+)\s*,\s*(\d+)\s*\)/))) ops.push({ type: "delete", ti: +m[1], ri: +m[2] });
-      else if ((m = t.match(/updateRow\(\s*(\d+)\s*,\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type: "update", ti: +m[1], ri: +m[2], data: parseDataObj(m[3]) });
+      if ((m = t.match(/insertRow\(\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type:"insert", ti:+m[1], data:parseDataObj(m[2]) });
+      else if ((m = t.match(/deleteRow\(\s*(\d+)\s*,\s*(\d+)\s*\)/))) ops.push({ type:"delete", ti:+m[1], ri:+m[2] });
+      else if ((m = t.match(/updateRow\(\s*(\d+)\s*,\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type:"update", ti:+m[1], ri:+m[2], data:parseDataObj(m[3]) });
     }
   }
   return ops;
 }
 function applyOps(ops) {
-  const del = ops.filter(o => o.type === "delete").sort((a, b) => a.ti !== b.ti ? b.ti - a.ti : b.ri - a.ri);
+  const del = ops.filter(o => o.type === "delete").sort((a,b) => a.ti !== b.ti ? b.ti-a.ti : b.ri-a.ri);
   for (const o of del) execDelete(o.ti, o.ri);
   for (const o of ops.filter(o => o.type === "update")) execUpdate(o.ti, o.ri, o.data);
   for (const o of ops.filter(o => o.type === "insert")) execInsert(o.ti, o.data);
 }
 
-// ============================================================
-// MESSAGE PROCESSING
-// ============================================================
+// ── MESSAGE PROCESSING ──
 
 function processMsg(text) { if (!text) return false; const ops = parseEdits(text); if (ops.length) { applyOps(ops); saveTables(); refreshPanel(); updateExtSlot(); return true; } return false; }
 function scanAll() {
@@ -134,21 +125,19 @@ function scanAll() {
   saveTables(); refreshPanel(); updateExtSlot();
 }
 
-// ============================================================
-// PROMPT INJECTION
-// ============================================================
+// ── PROMPT INJECTION ──
 
 function buildPrompt() {
   const settings = getSettings(); if (!settings.injectEnabled) return "";
   const tables = getTables();
-  const enabled = Object.entries(settings.injectTables).filter(([_, v]) => v).map(([k]) => +k).sort((a, b) => a - b);
+  const enabled = Object.entries(settings.injectTables).filter(([_,v]) => v).map(([k]) => +k).sort((a,b) => a-b);
   if (!enabled.length) return "";
   let p = "\n[FAB Sheet — Current Data]\n";
   for (const idx of enabled) {
     const t = tables[idx]; if (!t) continue;
     p += `\n### Table ${idx}: ${t.name}\nColumns: ${t.columns.join(" | ")}\n`;
     if (!t.rows.length) p += "(empty)\n";
-    else for (let ri = 0; ri < t.rows.length; ri++) p += `[${ri}] ${t.columns.map((_, ci) => t.rows[ri][ci] || "").join(" | ")}\n`;
+    else for (let ri = 0; ri < t.rows.length; ri++) p += `[${ri}] ${t.columns.map((_,ci) => t.rows[ri][ci]||"").join(" | ")}\n`;
   }
   p += `\n[Table Edit Instructions]
 When data changes, output <tableEdit> at END of response.
@@ -156,9 +145,10 @@ Commands: insertRow(tableIndex, {colIndex: "value"}) / updateRow(tableIndex, row
 Tables: ${enabled.join(", ")}
 
 IMPORTANT — Character data is split across multiple tables linked by column 0 "인물" (character name).
-T1=basic profile, T2=relationships (per pair), T3=traits/magic/abilities (per entry), T4=inventory (per item), T5=storyline (missions/events/combat).
+T1=basic profile (인물/능력치/외형/성격/기타), T2=relationships (per pair), T3=traits/magic/rituals (per entry: 분류→계열→유형→이름→상세), T4=inventory (per item), T5=storyline (missions/events/combat).
 When adding a new character: insert into T1 + relevant rows in T2/T3/T4.
 When updating relationships/traits/items: use T2/T3/T4 directly.
+T3 column 1 "분류" accepts: 특성/마법/의식/능력 or free text. Column 2 "계열" is the school/lineage. Column 3 "유형" is base/extended/etc.
 T5 column 1 "유형" accepts: 임무/이벤트/전투 or free text.
 Include <tableEdit> ONLY when data actually changes. Place AFTER narrative.\n`;
   return p;
@@ -170,50 +160,44 @@ function injectPrompt() {
   ctx.extensionPrompts[EXT] = { value: prompt, position: 1, depth: getSettings().injectDepth, role: 0 };
 }
 
-// ============================================================
-// AI GENERATION
-// ============================================================
+// ── AI GENERATION ──
 
 async function aiGenerate(instruction, mode) {
   const schema = getSchema(); const tables = getTables();
   let data = "";
   for (let i = 0; i < schema.length; i++) {
     const t = tables[i]; if (!t) continue;
-    data += `Table ${i}: "${t.name}" — Cols: ${t.columns.map((c, ci) => `[${ci}]${c}`).join(", ")}\n`;
-    if (t.rows.length) for (let ri = 0; ri < t.rows.length; ri++) data += `  [${ri}] ${t.columns.map((_, ci) => t.rows[ri][ci] || "").join(" | ")}\n`;
+    data += `Table ${i}: "${t.name}" — Cols: ${t.columns.map((c,ci) => `[${ci}]${c}`).join(", ")}\n`;
+    if (t.rows.length) for (let ri = 0; ri < t.rows.length; ri++) data += `  [${ri}] ${t.columns.map((_,ci) => t.rows[ri][ci]||"").join(" | ")}\n`;
     else data += "  (empty)\n";
   }
   const ctx = getContext(); let chat = "";
   if (ctx.chat?.length) for (const msg of ctx.chat.slice(-15)) {
-    const text = (msg.mes || "").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "").trim();
-    if (text) chat += `[${msg.is_user ? "User" : "Char"}]: ${text.substring(0, 600)}\n`;
+    const text = (msg.mes||"").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi,"").trim();
+    if (text) chat += `[${msg.is_user ? "User" : "Char"}]: ${text.substring(0,600)}\n`;
   }
   const sys = mode === "setup"
-    ? `Data assistant. Analyze chat, populate ALL tables.\n\nSchema:\n${data}\nChat:\n${chat || "(none)"}\n\nRULES:\n- Output ONLY <tableEdit>.\n- Character data is SPLIT: T1=profile, T2=relationships (one row per relationship pair), T3=traits/magic (one row per trait/spell), T4=inventory (one row per item), T5=storyline.\n- Link all by column 0 "인물" (exact name match).\n- NO empty rows. Be thorough.`
-    : `Data assistant. Generate table edits.\n\nSchema+Data:\n${data}\n${chat ? `Chat:\n${chat}` : ""}\n\nRULES:\n- Output ONLY <tableEdit>. Character data split across T1-T4 linked by "인물". NO empty rows.`;
-  try { return await generateRaw(instruction, "", false, false, sys); }
-  catch { try { return await generateRaw(sys + "\n\n" + instruction, ""); } catch { return null; } }
+    ? `Data assistant. Analyze chat, populate ALL tables.\n\nSchema:\n${data}\nChat:\n${chat||"(none)"}\n\nRULES:\n- Output ONLY <tableEdit>.\n- T1: one row per character (인물/능력치/외형/성격/기타). 능력치 format: "KEY:VAL/KEY:VAL".\n- T2: one row per relationship pair.\n- T3: one row per trait/spell/ritual. Columns: 인물,분류(특성/마법/의식/능력),계열,유형(기본/확장/etc),이름,상세.\n- T4: one row per item.\n- T5: one row per storyline entry (임무/이벤트/전투).\n- Link all by column 0 "인물".\n- NO empty rows. Be thorough.`
+    : `Data assistant. Generate table edits.\n\nSchema+Data:\n${data}\n${chat ? `Chat:\n${chat}` : ""}\n\nRULES:\n- Output ONLY <tableEdit>.\n- T1=profile, T2=relationships, T3=traits/magic (분류→계열→유형→이름→상세), T4=inventory, T5=storyline.\n- Link by "인물". NO empty rows.`;
+  try { return await generateRaw(instruction,"",false,false,sys); }
+  catch { try { return await generateRaw(sys+"\n\n"+instruction,""); } catch { return null; } }
 }
 
-// ============================================================
-// HIDE BLOCKS
-// ============================================================
+// ── HIDE BLOCKS ──
 
 function hideBlocks() {
   if (!getSettings().hideTableEdit) return;
   document.querySelectorAll(".mes_text").forEach(el => {
     if (el.dataset.fabProcessed) return; el.dataset.fabProcessed = "true";
     const h = el.innerHTML;
-    const c = h.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "");
+    const c = h.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi,"").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi,"");
     if (c !== h) el.innerHTML = c;
   });
 }
 
-// ============================================================
-// RENDER HELPERS
-// ============================================================
+// ── RENDER HELPERS ──
 
-function esc(s) { return (s || "").replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">"); }
+function esc(s) { return (s||"").replace(/&/g,"&").replace(/</g,"<").replace(/>/g,">"); }
 
 function findTableByName(...keywords) {
   const schema = getSchema(); const tables = getTables();
@@ -227,15 +211,27 @@ function findTableByName(...keywords) {
 function filterByChar(table, charName) {
   if (!table?.rows) return [];
   const name = charName.trim().toLowerCase();
-  return table.rows.filter(r => (r[0] || "").trim().toLowerCase() === name);
+  return table.rows.filter(r => (r[0]||"").trim().toLowerCase() === name);
+}
+
+// Parse stat string like "COR:4/SEN:7/VOL:9" into [{key,val}]
+function parseStats(str) {
+  if (!str || !str.includes(":")) return null;
+  const parts = str.split(/[/;·,]/).map(s => s.trim()).filter(Boolean);
+  const stats = [];
+  for (const p of parts) {
+    const m = p.match(/^([A-Za-z가-힣\s]+)\s*:\s*(.+)$/);
+    if (m) stats.push({ key: m[1].trim(), val: m[2].trim() });
+  }
+  return stats.length >= 2 ? stats : null;
 }
 
 // ============================================================
-// RENDER — SCENE BANNER
+// RENDER — SCENE BANNER (T0)
 // ============================================================
 
 function renderSceneBanner() {
-  const found = findTableByName("시공간", "scene", "time");
+  const found = findTableByName("시공간","scene","time");
   if (!found || !found.table.rows.length) return "";
   const t = found.table;
   const last = t.rows[t.rows.length - 1];
@@ -248,14 +244,14 @@ function renderSceneBanner() {
   h += `</div>`;
   if (t.rows.length > 1) {
     h += `<div class="fab-fold"><div class="fab-fold-head" data-action="toggle-table" data-idx="scene-prev">
-      <span class="fab-fold-label">이전 씬 (${t.rows.length - 1})</span><span class="fab-fold-arrow" id="fab-arrow-scene-prev">▸</span>
+      <span class="fab-fold-label">이전 씬 (${t.rows.length-1})</span><span class="fab-fold-arrow" id="fab-arrow-scene-prev">▸</span>
     </div><div class="fab-fold-body" id="fab-tbody-scene-prev" style="display:none;">`;
-    for (let ri = t.rows.length - 2; ri >= 0; ri--) {
+    for (let ri = t.rows.length-2; ri >= 0; ri--) {
       const r = t.rows[ri];
-      h += `<div class="fab-scene-prev-row"><span class="fab-scene-prev-date">${esc(r[0])}</span>`;
+      h += `<div class="fab-prev-row"><span class="fab-prev-date">${esc(r[0])}</span>`;
       if (r[1]) h += `<span>${esc(r[1])}</span>`;
-      if (r[2]) h += `<span class="fab-scene-prev-loc">${esc(r[2])}</span>`;
-      if (r[3]) h += `<span class="fab-scene-prev-who">${esc(r[3])}</span>`;
+      if (r[2]) h += `<span class="fab-prev-loc">${esc(r[2])}</span>`;
+      if (r[3]) h += `<span class="fab-prev-who">${esc(r[3])}</span>`;
       h += `</div>`;
     }
     h += `</div></div>`;
@@ -264,23 +260,25 @@ function renderSceneBanner() {
 }
 
 // ============================================================
-// RENDER — CHARACTER SHEET (TRPG)
+// RENDER — CHARACTER SHEETS (T1 + T2 + T3 + T4 merged)
 // ============================================================
 
 function renderCharacterSheets() {
-  const charFound = findTableByName("캐릭터", "character", "char");
+  const charFound = findTableByName("캐릭터","character","char");
   if (!charFound || !charFound.table.rows.length) return '<div class="fab-empty">캐릭터 없음</div>';
 
-  const relFound = findTableByName("관계", "relation");
-  const traitFound = findTableByName("특성", "마법", "trait", "magic", "ability");
-  const invFound = findTableByName("소지품", "인벤", "item", "inventory");
-
+  const relFound = findTableByName("관계","relation");
+  const traitFound = findTableByName("특성","마법","trait","magic","ability");
+  const invFound = findTableByName("소지품","인벤","item","inventory");
   const charTable = charFound.table;
-  let h = "";
 
+  // Identify which column indices are "능력치" vs other fields
+  const statColIdx = charTable.columns.findIndex(c => c.includes("능력치") || c.toLowerCase().includes("stat"));
+
+  let h = "";
   for (let ri = 0; ri < charTable.rows.length; ri++) {
     const row = charTable.rows[ri];
-    const name = (row[0] || "???").trim();
+    const name = (row[0]||"???").trim();
     const initial = name.charAt(0).toUpperCase();
 
     h += `<div class="fab-cs"><div class="fab-cs-strip"></div>
@@ -291,16 +289,33 @@ function renderCharacterSheets() {
       </div>
       <div class="fab-cs-body" id="fab-tbody-char-${ri}" style="display:none;">`;
 
-    // ── BASIC INFO ──
-    h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">📋</span>기본 정보</div>`;
-    for (let ci = 1; ci < charTable.columns.length; ci++) {
-      const val = (row[ci] || "").trim();
-      if (!val) continue;
-      h += `<div class="fab-cs-field"><span class="fab-cs-lbl">${esc(charTable.columns[ci])}</span><span class="fab-cs-val">${esc(val)}</span></div>`;
+    // ── STATS BLOCK ──
+    if (statColIdx >= 0) {
+      const statsRaw = (row[statColIdx]||"").trim();
+      const stats = parseStats(statsRaw);
+      if (stats) {
+        h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">⬡</span>능력치</div><div class="fab-stat-grid">`;
+        for (const s of stats) {
+          h += `<div class="fab-stat-cell"><div class="fab-stat-key">${esc(s.key)}</div><div class="fab-stat-val">${esc(s.val)}</div></div>`;
+        }
+        h += `</div></div>`;
+      }
     }
-    h += `</div>`;
 
-    // ── RELATIONSHIPS ──
+    // ── BASIC FIELDS (excluding 인물 and 능력치) ──
+    let hasBasic = false;
+    let basicH = `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">📋</span>기본 정보</div>`;
+    for (let ci = 1; ci < charTable.columns.length; ci++) {
+      if (ci === statColIdx) continue;
+      const val = (row[ci]||"").trim();
+      if (!val) continue;
+      hasBasic = true;
+      basicH += `<div class="fab-cs-field"><span class="fab-cs-lbl">${esc(charTable.columns[ci])}</span><span class="fab-cs-val">${esc(val)}</span></div>`;
+    }
+    basicH += `</div>`;
+    if (hasBasic) h += basicH;
+
+    // ── RELATIONSHIPS (T2) ──
     if (relFound) {
       const rels = filterByChar(relFound.table, name);
       if (rels.length) {
@@ -309,40 +324,57 @@ function renderCharacterSheets() {
           h += `<div class="fab-cs-rel">
             <span class="fab-cs-rel-target">${esc(r[1])}</span>
             <span class="fab-cs-rel-type">${esc(r[2])}</span>
-            ${(r[3] || "").trim() ? `<span class="fab-cs-rel-detail">${esc(r[3])}</span>` : ""}
+            ${(r[3]||"").trim() ? `<span class="fab-cs-rel-detail">${esc(r[3])}</span>` : ""}
           </div>`;
         }
         h += `</div></div>`;
       }
     }
 
-    // ── TRAITS / MAGIC ──
+    // ── TRAITS / MAGIC (T3) — grouped by 분류 → 계열 → 유형 ──
     if (traitFound) {
       const traits = filterByChar(traitFound.table, name);
       if (traits.length) {
-        // Group by 유형
-        const groups = {};
+        // Group: 분류(col1) → 계열(col2) → entries
+        const classMap = {};
         for (const t of traits) {
-          const type = (t[2] || "기타").trim();
-          if (!groups[type]) groups[type] = [];
-          groups[type].push(t);
+          const cls = (t[1]||"기타").trim();
+          const line = (t[2]||"미분류").trim();
+          if (!classMap[cls]) classMap[cls] = {};
+          if (!classMap[cls][line]) classMap[cls][line] = [];
+          classMap[cls][line].push(t);
         }
+
         h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">✦</span>특성 / 마법</div>`;
-        for (const [type, items] of Object.entries(groups)) {
-          h += `<div class="fab-cs-trait-group"><span class="fab-cs-trait-type">${esc(type)}</span><div class="fab-cs-trait-list">`;
-          for (const t of items) {
-            h += `<div class="fab-cs-trait">
-              <span class="fab-cs-trait-name">${esc(t[1])}</span>
-              ${(t[3] || "").trim() ? `<span class="fab-cs-trait-desc">${esc(t[3])}</span>` : ""}
-            </div>`;
+
+        for (const [cls, lineages] of Object.entries(classMap)) {
+          h += `<div class="fab-trait-cls"><div class="fab-trait-cls-label">${esc(cls)}</div>`;
+
+          for (const [lineage, entries] of Object.entries(lineages)) {
+            h += `<div class="fab-trait-line"><div class="fab-trait-line-label">${esc(lineage)}</div><div class="fab-trait-entries">`;
+
+            for (const e of entries) {
+              const typeBadge = (e[3]||"").trim();
+              const tName = (e[4]||"").trim();
+              const tDesc = (e[5]||"").trim();
+              h += `<div class="fab-trait-entry">`;
+              if (typeBadge) h += `<span class="fab-trait-type-badge">${esc(typeBadge)}</span>`;
+              if (tName) h += `<span class="fab-trait-name">${esc(tName)}</span>`;
+              if (tDesc) h += `<span class="fab-trait-desc">${esc(tDesc)}</span>`;
+              h += `</div>`;
+            }
+
+            h += `</div></div>`;
           }
-          h += `</div></div>`;
+
+          h += `</div>`;
         }
+
         h += `</div>`;
       }
     }
 
-    // ── INVENTORY ──
+    // ── INVENTORY (T4) ──
     if (invFound) {
       const items = filterByChar(invFound.table, name);
       if (items.length) {
@@ -350,8 +382,8 @@ function renderCharacterSheets() {
         for (const item of items) {
           h += `<div class="fab-cs-inv-card">
             <div class="fab-cs-inv-name">${esc(item[1])}</div>
-            ${(item[2] || "").trim() ? `<div class="fab-cs-inv-desc">${esc(item[2])}</div>` : ""}
-            ${(item[3] || "").trim() ? `<div class="fab-cs-inv-fx">${esc(item[3])}</div>` : ""}
+            ${(item[2]||"").trim() ? `<div class="fab-cs-inv-desc">${esc(item[2])}</div>` : ""}
+            ${(item[3]||"").trim() ? `<div class="fab-cs-inv-fx">${esc(item[3])}</div>` : ""}
           </div>`;
         }
         h += `</div></div>`;
@@ -364,43 +396,40 @@ function renderCharacterSheets() {
 }
 
 // ============================================================
-// RENDER — STORYLINE LOG
+// RENDER — STORYLINE (T5)
 // ============================================================
 
 function renderStoryline() {
-  const found = findTableByName("스토리", "story", "활동", "activity", "log");
+  const found = findTableByName("스토리","story","활동","activity","log");
   if (!found || !found.table.rows.length) return '<div class="fab-empty">기록 없음</div>';
   const t = found.table;
   let h = '<div class="fab-logs">';
   for (const row of t.rows) {
-    const type = (row[1] || "").trim().toLowerCase();
+    const type = (row[1]||"").trim().toLowerCase();
     let badge = "etc";
     if (type.includes("임무") || type.includes("mission")) badge = "mission";
     else if (type.includes("이벤트") || type.includes("event")) badge = "event";
     else if (type.includes("전투") || type.includes("combat")) badge = "combat";
 
-    const status = (row[5] || "").trim().toLowerCase();
+    const status = (row[4]||"").trim().toLowerCase();
     let sc = "none";
     if (status.includes("진행") || status.includes("active")) sc = "active";
     else if (status.includes("완료") || status.includes("done") || status.includes("성공")) sc = "done";
     else if (status.includes("실패") || status.includes("fail")) sc = "fail";
 
     h += `<div class="fab-log">
-      <span class="fab-log-badge ${badge}">${esc(row[1] || "기타")}</span>
+      <span class="fab-log-badge ${badge}">${esc(row[1]||"기타")}</span>
       <div class="fab-log-body">
-        <div class="fab-log-title">${esc(row[0])}${(row[2] || "").trim() ? " — " + esc(row[2]) : ""}</div>
+        <div class="fab-log-title">${esc(row[0])}${(row[2]||"").trim() ? " — "+esc(row[2]) : ""}</div>
         <div class="fab-log-meta">`;
-    if ((row[3] || "").trim()) h += `<span>${esc(row[3])}</span>`;
-    if ((row[4] || "").trim()) h += `<span>${esc(row[4])}</span>`;
-    if ((row[5] || "").trim()) h += `<span class="fab-log-status ${sc}">${esc(row[5])}</span>`;
+    if ((row[3]||"").trim()) h += `<span>${esc(row[3])}</span>`;
+    if ((row[4]||"").trim()) h += `<span class="fab-log-status ${sc}">${esc(row[4])}</span>`;
     h += `</div></div></div>`;
   }
-  return h + '</div>';
+  return h+'</div>';
 }
 
-// ============================================================
-// RENDER — PLAIN TABLE
-// ============================================================
+// ── PLAIN TABLE ──
 
 function renderPlainTable(table) {
   if (!table?.rows.length) return '<div class="fab-empty">비어 있음</div>';
@@ -412,7 +441,7 @@ function renderPlainTable(table) {
     for (let ci = 0; ci < table.columns.length; ci++) h += `<td class="fab-rtd">${esc(table.rows[ri][ci])}</td>`;
     h += '</tr>';
   }
-  return h + '</tbody></table>';
+  return h+'</tbody></table>';
 }
 
 // ============================================================
@@ -423,30 +452,26 @@ function renderOverview() {
   const schema = getSchema(); const tables = getTables();
   let h = "";
 
-  // Scene
   h += renderSceneBanner();
 
-  // Character sheets
   const charIdx = schema.findIndex(s => s.name.includes("캐릭터") || s.name.toLowerCase().includes("char"));
   if (charIdx >= 0) {
     h += `<div class="fab-section-title">CHARACTERS</div>`;
     h += renderCharacterSheets();
   }
 
-  // Storyline
   const storyIdx = schema.findIndex(s => s.name.includes("스토리") || s.name.includes("활동") || s.name.toLowerCase().includes("story"));
   if (storyIdx >= 0) {
     h += `<div class="fab-section-title">STORYLINE</div>`;
     h += renderStoryline();
   }
 
-  // Catch any tables not rendered above
   const rendered = new Set();
   const sceneIdx = schema.findIndex(s => s.name.includes("시공간") || s.name.toLowerCase().includes("scene"));
   const relIdx = schema.findIndex(s => s.name.includes("관계") || s.name.toLowerCase().includes("relation"));
   const traitIdx = schema.findIndex(s => s.name.includes("특성") || s.name.includes("마법") || s.name.toLowerCase().includes("trait"));
   const invIdx = schema.findIndex(s => s.name.includes("소지품") || s.name.toLowerCase().includes("item") || s.name.toLowerCase().includes("inventory"));
-  [sceneIdx, charIdx, relIdx, traitIdx, invIdx, storyIdx].filter(i => i >= 0).forEach(i => rendered.add(i));
+  [sceneIdx, charIdx, relIdx, traitIdx, invIdx, storyIdx].filter(i => i>=0).forEach(i => rendered.add(i));
 
   for (let i = 0; i < schema.length; i++) {
     if (rendered.has(i)) continue;
@@ -454,7 +479,7 @@ function renderOverview() {
     h += `<div class="fab-section-title">${esc(t.name)}</div>${renderPlainTable(t)}`;
   }
 
-  return h || '<div class="fab-empty">데이터 없음. AI 탭에서 초기 생성을 해보세요.</div>';
+  return h || '<div class="fab-empty">데이터 없음</div>';
 }
 
 function renderRaw() {
@@ -463,9 +488,7 @@ function renderRaw() {
   return h;
 }
 
-// ============================================================
-// RENDER — GENERATE
-// ============================================================
+// ── GENERATE ──
 
 function renderGenerate() {
   const tables = getTables();
@@ -473,36 +496,34 @@ function renderGenerate() {
   let h = "";
   if (!hasData) {
     h += `<div class="fab-card fab-setup-card"><div class="fab-ch">✨ 초기 셋업</div>
-      <div class="fab-setup-info">채팅 분석 → <strong>캐릭터 시트 + 관계 + 특성/마법 + 소지품 + 스토리라인</strong> 자동 생성</div>
-      <textarea id="fab-setup-input" class="fab-gen-textarea" placeholder="채팅 내용을 분석해서 시트를 채워줘" rows="3"></textarea>
+      <div class="fab-setup-info">채팅 분석 → <strong>캐릭터 시트(능력치/외형/성격) + 관계 + 특성/마법 + 소지품 + 스토리라인</strong> 자동 생성</div>
+      <textarea id="fab-setup-input" class="fab-gen-textarea" placeholder="채팅을 분석해서 시트를 채워줘" rows="3"></textarea>
       <div class="fab-gen-actions"><button class="fab-set-btn primary" data-action="ai-setup">✨ 초기 생성</button></div>
       <div id="fab-setup-status" class="fab-gen-status"></div><div id="fab-setup-preview" class="fab-gen-preview"></div></div>`;
   }
   h += `<div class="fab-card"><div class="fab-ch">🤖 데이터 편집</div>
-    <textarea id="fab-gen-input" class="fab-gen-textarea" placeholder="예: 키안에게 단검 추가해줘 / 새 이벤트 기록해줘" rows="4"></textarea>
+    <textarea id="fab-gen-input" class="fab-gen-textarea" placeholder="예: 키안에게 단검 추가 / 새 이벤트 기록" rows="4"></textarea>
     <div class="fab-gen-actions"><button class="fab-set-btn primary" data-action="ai-generate">생성</button></div>
     <div id="fab-gen-status" class="fab-gen-status"></div><div id="fab-gen-preview" class="fab-gen-preview"></div></div>`;
   return h;
 }
 
-// ============================================================
-// RENDER — SETTINGS
-// ============================================================
+// ── SETTINGS ──
 
 function renderSettings() {
   const settings = getSettings(); const schema = settings.schema; const colors = settings.colors;
   let h = `<div class="fab-card"><div class="fab-ch">⚙ 일반</div>
-    <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-hide" ${settings.hideTableEdit ? "checked" : ""}><span><tableEdit> 숨기기</span></label></div>
+    <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-hide" ${settings.hideTableEdit?"checked":""}><span><tableEdit> 숨기기</span></label></div>
     <div class="fab-set-section"><div class="fab-set-label">패널 너비</div><input type="number" id="fab-opt-width" class="fab-set-input" value="${settings.panelWidth}" min="300" max="800" step="50"></div></div>`;
 
   h += `<div class="fab-card"><div class="fab-ch">🎨 색상</div>
-    <div class="fab-color-row"><span class="fab-color-label">액센트</span><input type="color" class="fab-color-picker" data-color-key="accent" value="${colors.accent || "#6c5ce7"}"><span class="fab-color-hex">${colors.accent || "#6c5ce7"}</span></div>
+    <div class="fab-color-row"><span class="fab-color-label">액센트</span><input type="color" class="fab-color-picker" data-color-key="accent" value="${colors.accent||"#6c5ce7"}"><span class="fab-color-hex">${colors.accent||"#6c5ce7"}</span></div>
     <button class="fab-set-btn danger" data-action="reset-colors" style="margin-top:8px">초기화</button></div>`;
 
   h += `<div class="fab-card"><div class="fab-ch">🧠 AI 참조</div>
-    <label class="fab-set-chk"><input type="checkbox" id="fab-opt-inject" ${settings.injectEnabled ? "checked" : ""}><span>AI에 시트 전달</span></label>
-    <div id="fab-inject-tables" class="${settings.injectEnabled ? "" : "fab-disabled"}" style="margin-top:8px;">
-    ${schema.map((s, i) => `<label class="fab-set-chk fab-inject-row"><input type="checkbox" data-inject-idx="${i}" ${settings.injectTables[i] ? "checked" : ""}><span><span class="fab-inject-idx">${i}</span>${esc(s.name)}</span><span class="fab-inject-info">${s.columns.length}컬럼·${(getTables()[i]?.rows?.length || 0)}행</span></label>`).join("")}
+    <label class="fab-set-chk"><input type="checkbox" id="fab-opt-inject" ${settings.injectEnabled?"checked":""}><span>AI에 시트 전달</span></label>
+    <div id="fab-inject-tables" class="${settings.injectEnabled?"":"fab-disabled"}" style="margin-top:8px;">
+    ${schema.map((s,i) => `<label class="fab-set-chk fab-inject-row"><input type="checkbox" data-inject-idx="${i}" ${settings.injectTables[i]?"checked":""}><span><span class="fab-inject-idx">${i}</span>${esc(s.name)}</span><span class="fab-inject-info">${s.columns.length}컬럼·${(getTables()[i]?.rows?.length||0)}행</span></label>`).join("")}
     </div>
     <div class="fab-set-section" style="margin-top:10px"><div class="fab-set-label">삽입 깊이</div><input type="number" id="fab-opt-depth" class="fab-set-input" value="${settings.injectDepth}" min="0" max="999"></div></div>`;
 
@@ -515,7 +536,7 @@ function renderSettings() {
     </div><div class="fab-schema-detail" id="fab-sdetail-${i}" style="display:none;">
       <div class="fab-schema-head"><input type="text" class="fab-schema-name" value="${esc(s.name)}" data-schema-name-idx="${i}"><button class="fab-ab2" data-action="del-table" data-idx="${i}">✕</button></div>
       <div class="fab-schema-cols">
-        ${s.columns.map((col, ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${esc(col)}" data-col-ti="${i}" data-col-ci="${ci}"><button class="fab-col-btn" data-action="del-col" data-ti="${i}" data-ci="${ci}">−</button></div>`).join("")}
+        ${s.columns.map((col,ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${esc(col)}" data-col-ti="${i}" data-col-ci="${ci}"><button class="fab-col-btn" data-action="del-col" data-ti="${i}" data-ci="${ci}">−</button></div>`).join("")}
         <button class="fab-col-btn add" data-action="add-col" data-ti="${i}">+ 컬럼</button>
       </div></div></div>`;
   }
@@ -528,9 +549,7 @@ function renderSettings() {
   return h;
 }
 
-// ============================================================
-// AI HANDLER
-// ============================================================
+// ── AI HANDLER ──
 
 async function handleAiAction(mode) {
   const isSetup = mode === "setup";
@@ -538,7 +557,7 @@ async function handleAiAction(mode) {
   const statusEl = document.getElementById(isSetup ? "fab-setup-status" : "fab-gen-status");
   const previewEl = document.getElementById(isSetup ? "fab-setup-preview" : "fab-gen-preview");
   const btn = document.querySelector(isSetup ? "[data-action='ai-setup']" : "[data-action='ai-generate']");
-  const instruction = (inputEl?.value || "").trim() || (isSetup ? "채팅 분석해서 모든 테이블 채워줘" : "");
+  const instruction = (inputEl?.value||"").trim() || (isSetup ? "채팅 분석해서 모든 테이블 채워줘" : "");
   if (!instruction && !isSetup) { if (statusEl) statusEl.innerHTML = '<span class="fab-gen-err">입력 필요.</span>'; return; }
   if (btn) { btn.disabled = true; btn.textContent = "생성 중..."; }
   if (statusEl) statusEl.innerHTML = '<span class="fab-gen-loading">⏳ 요청 중...</span>';
@@ -549,12 +568,12 @@ async function handleAiAction(mode) {
     const ops = parseEdits(resp);
     if (!ops.length) {
       if (statusEl) statusEl.innerHTML = '<span class="fab-gen-err">유효한 명령 없음.</span>';
-      if (previewEl) previewEl.innerHTML = `<div class="fab-gen-raw"><pre>${esc(resp.substring(0, 2000))}</pre></div>`;
+      if (previewEl) previewEl.innerHTML = `<div class="fab-gen-raw"><pre>${esc(resp.substring(0,2000))}</pre></div>`;
       return;
     }
     let ph = `<div class="fab-gen-ops-label">${ops.length}개 명령:</div>`;
     for (const op of ops) {
-      const label = op.type === "insert" ? `+ T${op.ti} insert` : op.type === "update" ? `~ T${op.ti}[${op.ri}] update` : `- T${op.ti}[${op.ri}] delete`;
+      const label = op.type==="insert" ? `+ T${op.ti} insert` : op.type==="update" ? `~ T${op.ti}[${op.ri}] update` : `- T${op.ti}[${op.ri}] delete`;
       ph += `<div class="fab-gen-op ${op.type}">${label}</div>`;
     }
     ph += `<div class="fab-gen-confirm-actions"><button class="fab-set-btn primary" data-action="ai-apply" data-source="${mode}">적용</button><button class="fab-set-btn" data-action="ai-cancel" data-source="${mode}">취소</button></div>`;
@@ -564,9 +583,7 @@ async function handleAiAction(mode) {
   finally { if (btn) { btn.disabled = false; btn.textContent = isSetup ? "✨ 초기 생성" : "생성"; } }
 }
 
-// ============================================================
-// EVENT DELEGATION
-// ============================================================
+// ── EVENT DELEGATION ──
 
 function setupDelegation() {
   const content = document.getElementById("fab-content"); if (!content) return;
@@ -578,14 +595,14 @@ function setupDelegation() {
         const idx = el.dataset.idx;
         const body = document.getElementById(`fab-tbody-${idx}`);
         const arrow = document.getElementById(`fab-arrow-${idx}`);
-        if (body) { const o = body.style.display !== "none"; body.style.display = o ? "none" : "block"; if (arrow) arrow.textContent = o ? "▸" : "▾"; }
+        if (body) { const o = body.style.display!=="none"; body.style.display = o?"none":"block"; if (arrow) arrow.textContent = o?"▸":"▾"; }
         break;
       }
       case "toggle-schema": {
         const idx = el.dataset.idx;
         const d = document.getElementById(`fab-sdetail-${idx}`);
         const a = document.getElementById(`fab-sarrow-${idx}`);
-        if (d) { const o = d.style.display !== "none"; d.style.display = o ? "none" : "block"; if (a) a.textContent = o ? "▸" : "▾"; }
+        if (d) { const o = d.style.display!=="none"; d.style.display = o?"none":"block"; if (a) a.textContent = o?"▸":"▾"; }
         break;
       }
       case "del-table": {
@@ -593,17 +610,17 @@ function setupDelegation() {
         if (schema.length <= 1) break;
         if (confirm(`"${schema[idx].name}" 삭제?`)) {
           schema.splice(idx, 1);
-          const ni = {}; for (let i = 0; i < schema.length; i++) ni[i] = getSettings().injectTables[i >= idx ? i + 1 : i] ?? true;
+          const ni = {}; for (let i = 0; i < schema.length; i++) ni[i] = getSettings().injectTables[i>=idx?i+1:i] ?? true;
           getSettings().injectTables = ni; setSchema(schema); refreshPanel(); updateExtSlot();
         }
         break;
       }
-      case "add-col": { const ti = +el.dataset.ti; const s = getSchema(); if (s[ti]) { s[ti].columns.push(`Col${s[ti].columns.length + 1}`); setSchema(s); refreshPanel(); } break; }
-      case "del-col": { const ti = +el.dataset.ti, ci = +el.dataset.ci; const s = getSchema(); if (s[ti]?.columns.length > 1) { s[ti].columns.splice(ci, 1); setSchema(s); refreshPanel(); } break; }
-      case "add-table": { const s = getSchema(); s.push({ name: `Table ${s.length}`, columns: ["Col1"] }); getSettings().injectTables[s.length - 1] = true; setSchema(s); refreshPanel(); break; }
+      case "add-col": { const ti = +el.dataset.ti; const s = getSchema(); if (s[ti]) { s[ti].columns.push(`Col${s[ti].columns.length+1}`); setSchema(s); refreshPanel(); } break; }
+      case "del-col": { const ti = +el.dataset.ti, ci = +el.dataset.ci; const s = getSchema(); if (s[ti]?.columns.length > 1) { s[ti].columns.splice(ci,1); setSchema(s); refreshPanel(); } break; }
+      case "add-table": { const s = getSchema(); s.push({ name:`Table ${s.length}`, columns:["Col1"] }); getSettings().injectTables[s.length-1] = true; setSchema(s); refreshPanel(); break; }
       case "save-schema": {
         const schema = getSchema();
-        document.querySelectorAll("[data-schema-name-idx]").forEach(input => { const i = +input.dataset.schemaNameIdx; if (schema[i]) schema[i].name = input.value.trim() || `Table ${i}`; });
+        document.querySelectorAll("[data-schema-name-idx]").forEach(input => { const i = +input.dataset.schemaNameIdx; if (schema[i]) schema[i].name = input.value.trim()||`Table ${i}`; });
         for (let i = 0; i < schema.length; i++) { const cols = []; document.querySelectorAll(`[data-col-ti="${i}"]`).forEach(inp => { const v = inp.value.trim(); if (v) cols.push(v); }); if (cols.length) schema[i].columns = cols; }
         setSchema(schema); getTables(); saveTables(); injectPrompt(); updateExtSlot();
         alert("저장."); refreshPanel();
@@ -614,10 +631,10 @@ function setupDelegation() {
       case "json-apply": {
         const input = document.getElementById("fab-json-input"); const st = document.getElementById("fab-json-status");
         try {
-          const parsed = JSON.parse((input?.value || "").trim());
+          const parsed = JSON.parse((input?.value||"").trim());
           if (!Array.isArray(parsed)) throw new Error("배열 필요");
           if (!confirm(`${parsed.length}개 교체?`)) break;
-          const ns = parsed.map(t => ({ name: String(t.name), columns: t.columns.map(c => String(c)) }));
+          const ns = parsed.map(t => ({ name:String(t.name), columns:t.columns.map(c => String(c)) }));
           const s = getSettings(); s.schema = ns; s.injectTables = {};
           for (let i = 0; i < ns.length; i++) s.injectTables[i] = true;
           saveSettings(); getTables(); saveTables(); refreshPanel(); updateExtSlot();
@@ -625,19 +642,19 @@ function setupDelegation() {
         } catch (err) { st.innerHTML = `<span class="fab-gen-err">${err.message}</span>`; }
         break;
       }
-      case "json-export": { const inp = document.getElementById("fab-json-input"); if (inp) inp.value = JSON.stringify(getSchema(), null, 2); break; }
+      case "json-export": { const inp = document.getElementById("fab-json-input"); if (inp) inp.value = JSON.stringify(getSchema(),null,2); break; }
       case "ai-generate": handleAiAction("generate"); break;
       case "ai-setup": handleAiAction("setup"); break;
       case "ai-apply": {
-        const src = el.dataset.source || "generate";
-        const p = document.getElementById(src === "setup" ? "fab-setup-preview" : "fab-gen-preview");
+        const src = el.dataset.source||"generate";
+        const p = document.getElementById(src==="setup"?"fab-setup-preview":"fab-gen-preview");
         if (p?.dataset.pendingOps) { applyOps(JSON.parse(p.dataset.pendingOps)); saveTables(); refreshPanel(); updateExtSlot(); }
         break;
       }
       case "ai-cancel": {
-        const src = el.dataset.source || "generate";
-        const p = document.getElementById(src === "setup" ? "fab-setup-preview" : "fab-gen-preview");
-        const s = document.getElementById(src === "setup" ? "fab-setup-status" : "fab-gen-status");
+        const src = el.dataset.source||"generate";
+        const p = document.getElementById(src==="setup"?"fab-setup-preview":"fab-gen-preview");
+        const s = document.getElementById(src==="setup"?"fab-setup-status":"fab-gen-status");
         if (p) p.innerHTML = ""; if (s) s.innerHTML = '<span class="fab-gen-info">취소.</span>';
         break;
       }
@@ -646,10 +663,10 @@ function setupDelegation() {
   content.addEventListener("change", (e) => {
     const t = e.target;
     if (t.id === "fab-opt-hide") { getSettings().hideTableEdit = t.checked; saveSettings(); }
-    else if (t.id === "fab-opt-width") { getSettings().panelWidth = +t.value || 440; saveSettings(); applyPanelWidth(); }
-    else if (t.id === "fab-opt-inject") { getSettings().injectEnabled = t.checked; saveSettings(); document.getElementById("fab-inject-tables")?.classList.toggle("fab-disabled", !t.checked); updateExtSlot(); }
+    else if (t.id === "fab-opt-width") { getSettings().panelWidth = +t.value||440; saveSettings(); applyPanelWidth(); }
+    else if (t.id === "fab-opt-inject") { getSettings().injectEnabled = t.checked; saveSettings(); document.getElementById("fab-inject-tables")?.classList.toggle("fab-disabled",!t.checked); updateExtSlot(); }
     else if (t.dataset.injectIdx !== undefined) { getSettings().injectTables[+t.dataset.injectIdx] = t.checked; saveSettings(); updateExtSlot(); }
-    else if (t.id === "fab-opt-depth") { getSettings().injectDepth = +t.value || 4; saveSettings(); }
+    else if (t.id === "fab-opt-depth") { getSettings().injectDepth = +t.value||4; saveSettings(); }
   });
   content.addEventListener("input", (e) => {
     const t = e.target;
@@ -661,9 +678,7 @@ function setupDelegation() {
   });
 }
 
-// ============================================================
-// EXT SLOT
-// ============================================================
+// ── EXT SLOT ──
 
 function createExtSlot() {
   const c = document.getElementById("extensions_settings2"); if (!c) return;
@@ -674,10 +689,10 @@ function createExtSlot() {
     <div class="fab-ext-actions"><input id="fab-ext-btn-open" class="menu_button" type="button" value="📋 시트"><input id="fab-ext-btn-scan" class="menu_button" type="button" value="↻ 재스캔"></div><hr>
     <div class="fab-ext-quick"><label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-hide"><span><tableEdit> 숨기기</span></label><label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-inject"><span>AI에 데이터 전달</span></label></div></div></div>`;
   c.appendChild(w);
-  w.querySelector(".inline-drawer-toggle").addEventListener("click", function () {
+  w.querySelector(".inline-drawer-toggle").addEventListener("click", function() {
     const ct = w.querySelector(".inline-drawer-content"); const a = w.querySelector(".inline-drawer-icon.down");
-    const o = ct.style.display !== "none"; ct.style.display = o ? "none" : "block";
-    if (a) { a.classList.toggle("fa-circle-chevron-down", o); a.classList.toggle("fa-circle-chevron-up", !o); }
+    const o = ct.style.display!=="none"; ct.style.display = o?"none":"block";
+    if (a) { a.classList.toggle("fa-circle-chevron-down",o); a.classList.toggle("fa-circle-chevron-up",!o); }
   });
   document.getElementById("fab-ext-btn-open").addEventListener("click", () => { if (!panelOpen) togglePanel(); });
   document.getElementById("fab-ext-btn-scan").addEventListener("click", scanAll);
@@ -690,24 +705,22 @@ function createExtSlot() {
 function updateExtSlot() {
   const s = document.getElementById("fab-ext-status"); if (!s) return;
   const st = getSettings(); const t = getTables();
-  const total = Object.values(t).reduce((n, t) => n + (t.rows?.length || 0), 0);
+  const total = Object.values(t).reduce((n,t) => n+(t.rows?.length||0), 0);
   const ec = Object.values(st.injectTables).filter(v => v).length;
   s.innerHTML = `<div class="fab-ext-row"><span>테이블</span><span>${st.schema.length}개 (${total}행)</span></div>
-    <div class="fab-ext-row"><span>AI</span><span style="color:${st.injectEnabled ? "var(--fab-success)" : "var(--fab-danger)"}">${st.injectEnabled ? `ON (${ec}/${st.schema.length})` : "OFF"}</span></div>`;
+    <div class="fab-ext-row"><span>AI</span><span style="color:${st.injectEnabled?"var(--fab-success)":"var(--fab-danger)"}">${st.injectEnabled?`ON (${ec}/${st.schema.length})`:"OFF"}</span></div>`;
 }
 
-// ============================================================
-// WAND + PANEL
-// ============================================================
+// ── WAND + PANEL ──
 
 function registerWandAction() {
   const w = document.getElementById("extensionsMenu");
   if (w) { addWand(w); return; }
-  new MutationObserver((_, o) => { const w = document.getElementById("extensionsMenu"); if (w) { o.disconnect(); addWand(w); } }).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver((_,o) => { const w = document.getElementById("extensionsMenu"); if (w) { o.disconnect(); addWand(w); } }).observe(document.body, { childList:true, subtree:true });
 }
 function addWand(c) {
   if (document.getElementById("fab-wand-btn")) return;
-  const b = document.createElement("div"); b.id = "fab-wand-btn"; b.classList.add("list-group-item", "flex-container", "flexGap5");
+  const b = document.createElement("div"); b.id = "fab-wand-btn"; b.classList.add("list-group-item","flex-container","flexGap5");
   b.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent)"></span> FAB 시트`;
   b.addEventListener("click", () => { if (!panelOpen) togglePanel(); }); c.appendChild(b);
 }
@@ -716,8 +729,8 @@ let currentTab = "overview", panelOpen = false, rawMode = false;
 
 function applyPanelWidth() {
   const p = document.getElementById("fab-panel"); if (!p) return;
-  const w = getSettings().panelWidth || 440;
-  p.style.width = w + "px"; p.style.right = panelOpen ? "0" : `-${w + 20}px`;
+  const w = getSettings().panelWidth||440;
+  p.style.width = w+"px"; p.style.right = panelOpen?"0":`-${w+20}px`;
 }
 
 function createUI() {
@@ -736,9 +749,9 @@ function createUI() {
   document.getElementById("fab-close").addEventListener("click", togglePanel);
   document.getElementById("fab-rescan").addEventListener("click", scanAll);
   document.getElementById("fab-raw-btn").addEventListener("click", () => {
-    rawMode = !rawMode; document.getElementById("fab-raw-btn").classList.toggle("active", rawMode);
+    rawMode = !rawMode; document.getElementById("fab-raw-btn").classList.toggle("active",rawMode);
     if (rawMode) { currentTab = "raw"; panel.querySelectorAll(".fab-tab").forEach(t => t.classList.remove("active")); }
-    else { currentTab = "overview"; panel.querySelectorAll(".fab-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === "overview")); }
+    else { currentTab = "overview"; panel.querySelectorAll(".fab-tab").forEach(t => t.classList.toggle("active",t.dataset.tab==="overview")); }
     refreshPanel();
   });
   panel.querySelectorAll(".fab-tab").forEach(tab => tab.addEventListener("click", () => {
@@ -758,16 +771,14 @@ function refreshPanel() {
   }
 }
 
-// ============================================================
-// INIT
-// ============================================================
+// ── INIT ──
 
 jQuery(async () => {
   createUI(); createExtSlot(); registerWandAction(); applyColors();
   eventSource.on(event_types.GENERATION_STARTED, () => injectPrompt());
-  eventSource.on(event_types.MESSAGE_RECEIVED, (idx) => { const msg = getContext().chat[idx]; if (msg?.mes) processMsg(msg.mes); setTimeout(hideBlocks, 300); });
-  eventSource.on(event_types.MESSAGE_EDITED, () => { scanAll(); setTimeout(hideBlocks, 300); });
+  eventSource.on(event_types.MESSAGE_RECEIVED, (idx) => { const msg = getContext().chat[idx]; if (msg?.mes) processMsg(msg.mes); setTimeout(hideBlocks,300); });
+  eventSource.on(event_types.MESSAGE_EDITED, () => { scanAll(); setTimeout(hideBlocks,300); });
   eventSource.on(event_types.CHAT_CHANGED, () => setTimeout(() => { scanAll(); hideBlocks(); }, 1000));
   setTimeout(() => { scanAll(); hideBlocks(); }, 2000);
-  console.log(`[FAB] ${EXT_DISPLAY} v6.0`);
+  console.log(`[FAB] ${EXT_DISPLAY} v7.0`);
 });
