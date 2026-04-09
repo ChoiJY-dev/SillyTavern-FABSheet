@@ -2,6 +2,7 @@ import { getContext, saveMetadataDebounced, extension_settings } from "../../../
 import { eventSource, event_types } from "../../../../script.js";
 
 const EXT = "flow-and-brand-sheet";
+const EXT_DISPLAY = "Flow & Brand TRPG Sheet";
 const META_KEY = "fabSheetData";
 const SETTINGS_KEY = "fabSheet";
 
@@ -33,38 +34,22 @@ function getSettings() {
       injectDepth: 4,
     };
   }
-
   const s = extension_settings[SETTINGS_KEY];
-
-  // Ensure injectTables has entry for every schema table
   if (!s.injectTables) s.injectTables = {};
   for (let i = 0; i < s.schema.length; i++) {
     if (s.injectTables[i] === undefined) s.injectTables[i] = true;
   }
-
-  // Clean up entries beyond schema length
   for (const k of Object.keys(s.injectTables)) {
     if (parseInt(k) >= s.schema.length) delete s.injectTables[k];
   }
-
   if (s.injectEnabled === undefined) s.injectEnabled = true;
   if (s.injectDepth === undefined) s.injectDepth = 4;
-
   return s;
 }
 
-function saveSettings() {
-  const context = getContext();
-  context.saveSettingsDebounced();
-}
-
+function saveSettings() { getContext().saveSettingsDebounced(); }
 function getSchema() { return getSettings().schema; }
-
-function setSchema(ns) {
-  getSettings().schema = ns;
-  saveSettings();
-}
-
+function setSchema(ns) { getSettings().schema = ns; saveSettings(); }
 function resetSchema() {
   const s = getSettings();
   s.schema = JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
@@ -78,101 +63,51 @@ function resetSchema() {
 // ============================================================
 
 function buildEmpty() {
-  const schema = getSchema();
-  const tables = {};
-  for (let i = 0; i < schema.length; i++) {
-    tables[i] = { name: schema[i].name, columns: [...schema[i].columns], rows: [] };
-  }
+  const schema = getSchema(); const tables = {};
+  for (let i = 0; i < schema.length; i++) tables[i] = { name: schema[i].name, columns: [...schema[i].columns], rows: [] };
   return tables;
 }
 
 function getTables() {
   const ctx = getContext();
-  if (!ctx.chatMetadata[META_KEY]) {
-    ctx.chatMetadata[META_KEY] = buildEmpty();
-    saveMetadataDebounced();
-  }
-
-  const schema = getSchema();
-  const tables = ctx.chatMetadata[META_KEY];
-
+  if (!ctx.chatMetadata[META_KEY]) { ctx.chatMetadata[META_KEY] = buildEmpty(); saveMetadataDebounced(); }
+  const schema = getSchema(); const tables = ctx.chatMetadata[META_KEY];
   for (let i = 0; i < schema.length; i++) {
-    if (!tables[i]) {
-      tables[i] = { name: schema[i].name, columns: [...schema[i].columns], rows: [] };
-    } else {
+    if (!tables[i]) { tables[i] = { name: schema[i].name, columns: [...schema[i].columns], rows: [] }; }
+    else {
       tables[i].name = schema[i].name;
-      const oldCols = tables[i].columns;
-      const newCols = schema[i].columns;
-      if (JSON.stringify(oldCols) !== JSON.stringify(newCols)) {
+      const oc = tables[i].columns, nc = schema[i].columns;
+      if (JSON.stringify(oc) !== JSON.stringify(nc)) {
         for (const row of tables[i].rows) {
-          for (let ci = 0; ci < newCols.length; ci++) {
-            if (row[ci] === undefined) row[ci] = "";
-          }
-          for (const key of Object.keys(row)) {
-            if (parseInt(key) >= newCols.length) delete row[key];
-          }
+          for (let ci = 0; ci < nc.length; ci++) { if (row[ci] === undefined) row[ci] = ""; }
+          for (const key of Object.keys(row)) { if (parseInt(key) >= nc.length) delete row[key]; }
         }
-        tables[i].columns = [...newCols];
+        tables[i].columns = [...nc];
       }
     }
   }
-
-  for (const k of Object.keys(tables).map(Number)) {
-    if (k >= schema.length) delete tables[k];
-  }
-
+  for (const k of Object.keys(tables).map(Number)) { if (k >= schema.length) delete tables[k]; }
   return tables;
 }
 
 function saveTables() { saveMetadataDebounced(); }
-
-function resetTables() {
-  const ctx = getContext();
-  ctx.chatMetadata[META_KEY] = buildEmpty();
-}
-
-function execInsert(ti, data) {
-  const t = getTables()[ti];
-  if (!t) return;
-  const row = {};
-  for (let i = 0; i < t.columns.length; i++) row[i] = data[i] !== undefined ? String(data[i]) : "";
-  t.rows.push(row);
-}
-
-function execDelete(ti, ri) {
-  const t = getTables()[ti];
-  if (!t || !t.rows[ri]) return;
-  t.rows.splice(ri, 1);
-}
-
-function execUpdate(ti, ri, data) {
-  const t = getTables()[ti];
-  if (!t || !t.rows[ri]) return;
-  for (const [ci, val] of Object.entries(data)) t.rows[ri][parseInt(ci)] = String(val);
-}
+function resetTables() { getContext().chatMetadata[META_KEY] = buildEmpty(); }
+function execInsert(ti, data) { const t = getTables()[ti]; if (!t) return; const row = {}; for (let i = 0; i < t.columns.length; i++) row[i] = data[i] !== undefined ? String(data[i]) : ""; t.rows.push(row); }
+function execDelete(ti, ri) { const t = getTables()[ti]; if (!t || !t.rows[ri]) return; t.rows.splice(ri, 1); }
+function execUpdate(ti, ri, data) { const t = getTables()[ti]; if (!t || !t.rows[ri]) return; for (const [ci, val] of Object.entries(data)) t.rows[ri][parseInt(ci)] = String(val); }
 
 // ============================================================
 // PARSER
 // ============================================================
 
-function parseDataObj(str) {
-  const d = {};
-  const re = /(\d+)\s*:\s*(?:"([^"]*?)"|'([^']*?)'|([^\s,}]+))/g;
-  let m;
-  while ((m = re.exec(str)) !== null) d[parseInt(m[1])] = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] || "";
-  return d;
-}
+function parseDataObj(str) { const d = {}; const re = /(\d+)\s*:\s*(?:"([^"]*?)"|'([^']*?)'|([^\s,}]+))/g; let m; while ((m = re.exec(str)) !== null) d[parseInt(m[1])] = m[2] !== undefined ? m[2] : m[3] !== undefined ? m[3] : m[4] || ""; return d; }
 
 function parseEdits(text) {
-  const ops = [];
-  const re = /<tableEdit>([\s\S]*?)<\/tableEdit>|<!--\s*tableEdit\s*-->([\s\S]*?)<!--\s*\/tableEdit\s*-->/gi;
-  let em;
+  const ops = []; const re = /<tableEdit>([\s\S]*?)<\/tableEdit>|<!--\s*tableEdit\s*-->([\s\S]*?)<!--\s*\/tableEdit\s*-->/gi; let em;
   while ((em = re.exec(text)) !== null) {
     const block = (em[1] || em[2] || "").replace(/<!--/g, "").replace(/-->/g, "");
     for (const line of block.split("\n")) {
-      const t = line.trim();
-      if (!t || t.startsWith("//")) continue;
-      let m;
+      const t = line.trim(); if (!t || t.startsWith("//")) continue; let m;
       if ((m = t.match(/insertRow\(\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type: "insert", ti: parseInt(m[1]), data: parseDataObj(m[2]) });
       else if ((m = t.match(/deleteRow\(\s*(\d+)\s*,\s*(\d+)\s*\)/))) ops.push({ type: "delete", ti: parseInt(m[1]), ri: parseInt(m[2]) });
       else if ((m = t.match(/updateRow\(\s*(\d+)\s*,\s*(\d+)\s*,\s*\{([^}]+)\}\s*\)/))) ops.push({ type: "update", ti: parseInt(m[1]), ri: parseInt(m[2]), data: parseDataObj(m[3]) });
@@ -192,22 +127,13 @@ function applyOps(ops) {
 // MESSAGE PROCESSING
 // ============================================================
 
-function processMsg(text) {
-  if (!text) return false;
-  const ops = parseEdits(text);
-  if (ops.length > 0) { applyOps(ops); saveTables(); refreshPanel(); return true; }
-  return false;
-}
+function processMsg(text) { if (!text) return false; const ops = parseEdits(text); if (ops.length > 0) { applyOps(ops); saveTables(); refreshPanel(); updateExtSlot(); return true; } return false; }
 
 function scanAll() {
-  const ctx = getContext();
-  if (!ctx.chat || ctx.chat.length === 0) return;
+  const ctx = getContext(); if (!ctx.chat || ctx.chat.length === 0) return;
   resetTables();
-  for (const msg of ctx.chat) {
-    if (msg.mes) { const ops = parseEdits(msg.mes); if (ops.length > 0) applyOps(ops); }
-  }
-  saveTables();
-  refreshPanel();
+  for (const msg of ctx.chat) { if (msg.mes) { const ops = parseEdits(msg.mes); if (ops.length > 0) applyOps(ops); } }
+  saveTables(); refreshPanel(); updateExtSlot();
   console.log("[FAB] Full scan complete.");
 }
 
@@ -217,38 +143,19 @@ function scanAll() {
 
 function buildPrompt() {
   const settings = getSettings();
-
-  // If injection is globally disabled, return empty
   if (!settings.injectEnabled) return "";
-
   const tables = getTables();
-  const enabledIndices = Object.entries(settings.injectTables)
-    .filter(([_, v]) => v)
-    .map(([k]) => parseInt(k))
-    .sort((a, b) => a - b);
-
-  // If no tables enabled, return empty
-  if (enabledIndices.length === 0) return "";
+  const enabled = Object.entries(settings.injectTables).filter(([_, v]) => v).map(([k]) => parseInt(k)).sort((a, b) => a - b);
+  if (enabled.length === 0) return "";
 
   let p = "\n[FAB TRPG Data Tables — Current State]\n";
-  p += `(Injected tables: ${enabledIndices.join(", ")})\n`;
-
-  for (const idx of enabledIndices) {
-    const table = tables[idx];
-    if (!table) continue;
-
-    p += `\n### Table ${idx}: ${table.name}\n`;
-    p += `Columns: ${table.columns.join(" | ")}\n`;
-    if (table.rows.length === 0) {
-      p += "(empty)\n";
-    } else {
-      for (let ri = 0; ri < table.rows.length; ri++) {
-        const vals = table.columns.map((_, ci) => table.rows[ri][ci] || "").join(" | ");
-        p += `[${ri}] ${vals}\n`;
-      }
-    }
+  p += `(Injected tables: ${enabled.join(", ")})\n`;
+  for (const idx of enabled) {
+    const table = tables[idx]; if (!table) continue;
+    p += `\n### Table ${idx}: ${table.name}\nColumns: ${table.columns.join(" | ")}\n`;
+    if (table.rows.length === 0) p += "(empty)\n";
+    else for (let ri = 0; ri < table.rows.length; ri++) { p += `[${ri}] ${table.columns.map((_, ci) => table.rows[ri][ci] || "").join(" | ")}\n`; }
   }
-
   p += `\n[Table Edit Instructions]
 When table data changes during the narrative, output modifications inside a <tableEdit> block at the END of your response.
 Commands:
@@ -256,7 +163,7 @@ Commands:
   updateRow(tableIndex, rowIndex, {colIndex: "newValue", ...})
   deleteRow(tableIndex, rowIndex)
 
-Available table indices for editing: ${enabledIndices.join(", ")}
+Available table indices for editing: ${enabled.join(", ")}
 
 Example:
 <tableEdit>
@@ -269,29 +176,14 @@ Rules:
 - Use exact row indices from the current state above.
 - Place <tableEdit> AFTER the narrative response.
 - Do NOT include <tableEdit> inside narrative prose.\n`;
-
   return p;
 }
 
 function injectPrompt() {
-  const ctx = getContext();
-  if (!ctx.extensionPrompts) ctx.extensionPrompts = {};
-
-  const settings = getSettings();
+  const ctx = getContext(); if (!ctx.extensionPrompts) ctx.extensionPrompts = {};
   const prompt = buildPrompt();
-
-  if (!prompt) {
-    // Remove injection if disabled
-    delete ctx.extensionPrompts[EXT];
-    return;
-  }
-
-  ctx.extensionPrompts[EXT] = {
-    value: prompt,
-    position: 1,
-    depth: settings.injectDepth,
-    role: 0,
-  };
+  if (!prompt) { delete ctx.extensionPrompts[EXT]; return; }
+  ctx.extensionPrompts[EXT] = { value: prompt, position: 1, depth: getSettings().injectDepth, role: 0 };
 }
 
 // ============================================================
@@ -301,12 +193,9 @@ function injectPrompt() {
 function hideBlocks() {
   if (!getSettings().hideTableEdit) return;
   document.querySelectorAll(".mes_text").forEach(el => {
-    if (el.dataset.fabProcessed) return;
-    el.dataset.fabProcessed = "true";
+    if (el.dataset.fabProcessed) return; el.dataset.fabProcessed = "true";
     const html = el.innerHTML;
-    const cleaned = html
-      .replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "")
-      .replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "");
+    const cleaned = html.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "");
     if (cleaned !== html) el.innerHTML = cleaned;
   });
 }
@@ -331,7 +220,7 @@ function pct(c, m) { return Math.round((c / Math.max(m, 1)) * 100); }
 function hpClr(c, m) { const r = m > 0 ? c / m : 0; return r > 0.5 ? "#66bb6a" : r > 0.25 ? "#ff9800" : "#ef5350"; }
 
 // ============================================================
-// RENDER TABS (character, inventory, missions, status, raw unchanged)
+// RENDER TABS
 // ============================================================
 
 function renderCharacter() {
@@ -396,200 +285,234 @@ function renderRaw() {
   return h;
 }
 
-// ============================================================
-// RENDER — SETTINGS (UPDATED)
-// ============================================================
-
 function renderSettings() {
-  const settings = getSettings();
-  const schema = settings.schema;
+  const settings = getSettings(); const schema = settings.schema;
+  let h = `<div class="fab-card"><div class="fab-ch">⚙ 일반 설정</div>
+    <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-hide" ${settings.hideTableEdit ? "checked" : ""}><span>채팅에서 <tableEdit> 숨기기</span></label></div>
+    <div class="fab-set-section"><div class="fab-set-label">패널 너비 (px)</div><input type="number" id="fab-opt-width" class="fab-set-input" value="${settings.panelWidth}" min="300" max="800" step="50"></div></div>`;
 
-  let h = "";
-
-  // ---- General Options ----
-  h += `<div class="fab-card">
-    <div class="fab-ch">⚙ 일반 설정</div>
-    <div class="fab-set-section">
-      <label class="fab-set-chk">
-        <input type="checkbox" id="fab-opt-hide" ${settings.hideTableEdit ? "checked" : ""}>
-        <span>채팅에서 <tableEdit> 숨기기</span>
-      </label>
+  h += `<div class="fab-card"><div class="fab-ch">🧠 AI 참조 설정</div>
+    <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-inject" ${settings.injectEnabled ? "checked" : ""}><span>테이블 데이터를 AI에 전달</span></label><div class="fab-set-hint">활성화하면 AI가 테이블 내용을 참고하여 응답합니다.</div></div>
+    <div id="fab-inject-tables" class="${settings.injectEnabled ? "" : "fab-disabled"}"><div class="fab-set-label">테이블별 주입 설정</div><div class="fab-set-hint">AI에 전달할 테이블을 개별적으로 선택합니다.</div>
+    ${schema.map((s, i) => `<label class="fab-set-chk fab-inject-row"><input type="checkbox" class="fab-inject-table-chk" data-idx="${i}" ${settings.injectTables[i] ? "checked" : ""}><span><span class="fab-inject-idx">${i}</span> ${s.name}</span><span class="fab-inject-info">${s.columns.length}컬럼 · ${(getTables()[i]?.rows?.length || 0)}행</span></label>`).join("")}
     </div>
-    <div class="fab-set-section">
-      <div class="fab-set-label">패널 너비 (px)</div>
-      <input type="number" id="fab-opt-width" class="fab-set-input" value="${settings.panelWidth}" min="300" max="800" step="50">
-    </div>
-  </div>`;
+    <div class="fab-set-section" style="margin-top:12px"><div class="fab-set-label">프롬프트 삽입 깊이</div><div class="fab-set-hint">숫자가 작을수록 최근 메시지에 가깝게 삽입됩니다.</div><input type="number" id="fab-opt-depth" class="fab-set-input" value="${settings.injectDepth}" min="0" max="999" step="1"></div></div>`;
 
-  // ---- AI Injection Options ----
-  h += `<div class="fab-card">
-    <div class="fab-ch">🧠 AI 참조 설정</div>
-    <div class="fab-set-section">
-      <label class="fab-set-chk">
-        <input type="checkbox" id="fab-opt-inject" ${settings.injectEnabled ? "checked" : ""}>
-        <span>테이블 데이터를 AI에 전달 (시스템 프롬프트 주입)</span>
-      </label>
-      <div class="fab-set-hint">활성화하면 AI가 테이블 내용을 참고하여 응답합니다. 비활성화하면 AI는 테이블을 인식하지 못합니다.</div>
-    </div>
-
-    <div id="fab-inject-tables" class="${settings.injectEnabled ? "" : "fab-disabled"}">
-      <div class="fab-set-label">테이블별 주입 설정</div>
-      <div class="fab-set-hint">AI에 전달할 테이블을 개별적으로 선택합니다. 체크 해제된 테이블은 AI가 참조하지 않습니다.</div>
-      ${schema.map((s, i) => `
-        <label class="fab-set-chk fab-inject-row">
-          <input type="checkbox" class="fab-inject-table-chk" data-idx="${i}" ${settings.injectTables[i] ? "checked" : ""}>
-          <span><span class="fab-inject-idx">${i}</span> ${s.name}</span>
-          <span class="fab-inject-info">${s.columns.length}개 컬럼 · ${(getTables()[i]?.rows?.length || 0)}행</span>
-        </label>
-      `).join("")}
-    </div>
-
-    <div class="fab-set-section" style="margin-top:12px">
-      <div class="fab-set-label">프롬프트 삽입 깊이 (Depth)</div>
-      <div class="fab-set-hint">시스템 프롬프트 내에서 테이블 데이터가 삽입되는 위치. 숫자가 작을수록 최근 메시지에 가깝게 삽입됩니다.</div>
-      <input type="number" id="fab-opt-depth" class="fab-set-input" value="${settings.injectDepth}" min="0" max="999" step="1">
-    </div>
-  </div>`;
-
-  // ---- Schema Editor ----
   h += '<div class="fab-card"><div class="fab-ch">⟐ 테이블 스키마 편집 ⟐</div>';
-
   for (let i = 0; i < schema.length; i++) {
     const s = schema[i];
-    h += `<div class="fab-schema-block" data-idx="${i}">
-      <div class="fab-schema-head">
-        <span class="fab-schema-idx">${i}</span>
-        <input type="text" class="fab-schema-name" value="${s.name}" data-idx="${i}" placeholder="테이블 이름">
-        <button class="fab-schema-del-table fab-ab2" data-idx="${i}" title="테이블 삭제">✕</button>
-      </div>
-      <div class="fab-schema-cols">
-        ${s.columns.map((col, ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${col}" data-ti="${i}" data-ci="${ci}" placeholder="컬럼명"><button class="fab-schema-del-col fab-col-btn" data-ti="${i}" data-ci="${ci}" title="컬럼 삭제">−</button></div>`).join("")}
-        <button class="fab-schema-add-col fab-col-btn add" data-ti="${i}">+ 컬럼 추가</button>
-      </div>
-    </div>`;
+    h += `<div class="fab-schema-block" data-idx="${i}"><div class="fab-schema-head"><span class="fab-schema-idx">${i}</span><input type="text" class="fab-schema-name" value="${s.name}" data-idx="${i}" placeholder="테이블 이름"><button class="fab-schema-del-table fab-ab2" data-idx="${i}" title="테이블 삭제">✕</button></div><div class="fab-schema-cols">${s.columns.map((col, ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${col}" data-ti="${i}" data-ci="${ci}" placeholder="컬럼명"><button class="fab-schema-del-col fab-col-btn" data-ti="${i}" data-ci="${ci}" title="컬럼 삭제">−</button></div>`).join("")}<button class="fab-schema-add-col fab-col-btn add" data-ti="${i}">+ 컬럼 추가</button></div></div>`;
   }
-
-  h += `<div class="fab-schema-actions">
-    <button id="fab-add-table" class="fab-set-btn">+ 테이블 추가</button>
-    <button id="fab-save-schema" class="fab-set-btn primary">저장</button>
-    <button id="fab-reset-schema" class="fab-set-btn danger">기본값 복원</button>
-  </div></div>`;
-
+  h += `<div class="fab-schema-actions"><button id="fab-add-table" class="fab-set-btn">+ 테이블 추가</button><button id="fab-save-schema" class="fab-set-btn primary">저장</button><button id="fab-reset-schema" class="fab-set-btn danger">기본값 복원</button></div></div>`;
   return h;
 }
 
 // ============================================================
-// BIND SETTINGS EVENTS (UPDATED)
+// BIND SETTINGS EVENTS
 // ============================================================
 
 function bindSettingsEvents() {
-  // Hide tableEdit
   const hideOpt = document.getElementById("fab-opt-hide");
   if (hideOpt) hideOpt.addEventListener("change", () => { getSettings().hideTableEdit = hideOpt.checked; saveSettings(); });
 
-  // Panel width
   const widthOpt = document.getElementById("fab-opt-width");
   if (widthOpt) widthOpt.addEventListener("change", () => { getSettings().panelWidth = parseInt(widthOpt.value) || 400; saveSettings(); applyPanelWidth(); });
 
-  // Global inject toggle
   const injectOpt = document.getElementById("fab-opt-inject");
-  if (injectOpt) {
-    injectOpt.addEventListener("change", () => {
-      getSettings().injectEnabled = injectOpt.checked;
-      saveSettings();
-      const tableSection = document.getElementById("fab-inject-tables");
-      if (tableSection) tableSection.classList.toggle("fab-disabled", !injectOpt.checked);
-    });
-  }
-
-  // Per-table inject toggles
-  document.querySelectorAll(".fab-inject-table-chk").forEach(chk => {
-    chk.addEventListener("change", () => {
-      const idx = parseInt(chk.dataset.idx);
-      getSettings().injectTables[idx] = chk.checked;
-      saveSettings();
-    });
+  if (injectOpt) injectOpt.addEventListener("change", () => {
+    getSettings().injectEnabled = injectOpt.checked; saveSettings();
+    const ts = document.getElementById("fab-inject-tables"); if (ts) ts.classList.toggle("fab-disabled", !injectOpt.checked);
+    updateExtSlot();
   });
 
-  // Depth
+  document.querySelectorAll(".fab-inject-table-chk").forEach(chk => {
+    chk.addEventListener("change", () => { getSettings().injectTables[parseInt(chk.dataset.idx)] = chk.checked; saveSettings(); updateExtSlot(); });
+  });
+
   const depthOpt = document.getElementById("fab-opt-depth");
   if (depthOpt) depthOpt.addEventListener("change", () => { getSettings().injectDepth = parseInt(depthOpt.value) || 4; saveSettings(); });
 
-  // Add table
   const addTable = document.getElementById("fab-add-table");
   if (addTable) addTable.addEventListener("click", () => {
-    const schema = getSchema();
-    schema.push({ name: `테이블 ${schema.length}`, columns: ["컬럼1"] });
-    getSettings().injectTables[schema.length - 1] = true;
-    setSchema(schema);
+    const schema = getSchema(); schema.push({ name: `테이블 ${schema.length}`, columns: ["컬럼1"] });
+    getSettings().injectTables[schema.length - 1] = true; setSchema(schema);
     refreshPanel(); bindSettingsEvents();
   });
 
-  // Save schema
   const saveBtn = document.getElementById("fab-save-schema");
   if (saveBtn) saveBtn.addEventListener("click", () => {
     const schema = getSchema();
-    document.querySelectorAll(".fab-schema-name").forEach(input => {
-      const idx = parseInt(input.dataset.idx);
-      if (schema[idx]) schema[idx].name = input.value.trim() || `테이블 ${idx}`;
-    });
-    for (let i = 0; i < schema.length; i++) {
-      const cols = [];
-      document.querySelectorAll(`.fab-schema-col[data-ti="${i}"]`).forEach(input => { const v = input.value.trim(); if (v) cols.push(v); });
-      if (cols.length > 0) schema[i].columns = cols;
-    }
-    setSchema(schema);
-    getTables(); saveTables(); injectPrompt();
-    alert("스키마 저장 완료. 다음 AI 응답부터 새 스키마가 적용됩니다.");
-    refreshPanel(); bindSettingsEvents();
+    document.querySelectorAll(".fab-schema-name").forEach(input => { const idx = parseInt(input.dataset.idx); if (schema[idx]) schema[idx].name = input.value.trim() || `테이블 ${idx}`; });
+    for (let i = 0; i < schema.length; i++) { const cols = []; document.querySelectorAll(`.fab-schema-col[data-ti="${i}"]`).forEach(input => { const v = input.value.trim(); if (v) cols.push(v); }); if (cols.length > 0) schema[i].columns = cols; }
+    setSchema(schema); getTables(); saveTables(); injectPrompt(); updateExtSlot();
+    alert("스키마 저장 완료."); refreshPanel(); bindSettingsEvents();
   });
 
-  // Reset schema
   const resetBtn = document.getElementById("fab-reset-schema");
-  if (resetBtn) resetBtn.addEventListener("click", () => {
-    if (confirm("기본값으로 복원하시겠습니까? 현재 스키마 설정이 초기화됩니다.")) {
-      resetSchema(); refreshPanel(); bindSettingsEvents();
-    }
-  });
+  if (resetBtn) resetBtn.addEventListener("click", () => { if (confirm("기본값으로 복원하시겠습니까?")) { resetSchema(); refreshPanel(); bindSettingsEvents(); updateExtSlot(); } });
 
-  // Delete table
   document.querySelectorAll(".fab-schema-del-table").forEach(btn => {
     btn.addEventListener("click", () => {
-      const idx = parseInt(btn.dataset.idx);
-      const schema = getSchema();
+      const idx = parseInt(btn.dataset.idx); const schema = getSchema();
       if (schema.length <= 1) { alert("최소 1개의 테이블은 필요합니다."); return; }
       if (confirm(`테이블 ${idx}: ${schema[idx].name}을(를) 삭제하시겠습니까?`)) {
         schema.splice(idx, 1);
-        // Re-index injectTables
-        const newInject = {};
-        for (let i = 0; i < schema.length; i++) {
-          const oldIdx = i >= idx ? i + 1 : i;
-          newInject[i] = getSettings().injectTables[oldIdx] !== undefined ? getSettings().injectTables[oldIdx] : true;
-        }
-        getSettings().injectTables = newInject;
-        setSchema(schema);
-        refreshPanel(); bindSettingsEvents();
+        const ni = {}; for (let i = 0; i < schema.length; i++) { const oi = i >= idx ? i + 1 : i; ni[i] = getSettings().injectTables[oi] !== undefined ? getSettings().injectTables[oi] : true; }
+        getSettings().injectTables = ni; setSchema(schema); refreshPanel(); bindSettingsEvents(); updateExtSlot();
       }
     });
   });
 
-  // Add column
   document.querySelectorAll(".fab-schema-add-col").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const ti = parseInt(btn.dataset.ti);
-      const schema = getSchema();
-      if (schema[ti]) { schema[ti].columns.push(`컬럼${schema[ti].columns.length + 1}`); setSchema(schema); refreshPanel(); bindSettingsEvents(); }
-    });
+    btn.addEventListener("click", () => { const ti = parseInt(btn.dataset.ti); const schema = getSchema(); if (schema[ti]) { schema[ti].columns.push(`컬럼${schema[ti].columns.length + 1}`); setSchema(schema); refreshPanel(); bindSettingsEvents(); } });
   });
 
-  // Delete column
   document.querySelectorAll(".fab-schema-del-col").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const ti = parseInt(btn.dataset.ti), ci = parseInt(btn.dataset.ci);
-      const schema = getSchema();
-      if (schema[ti] && schema[ti].columns.length > 1) { schema[ti].columns.splice(ci, 1); setSchema(schema); refreshPanel(); bindSettingsEvents(); }
-    });
+    btn.addEventListener("click", () => { const ti = parseInt(btn.dataset.ti), ci = parseInt(btn.dataset.ci); const schema = getSchema(); if (schema[ti] && schema[ti].columns.length > 1) { schema[ti].columns.splice(ci, 1); setSchema(schema); refreshPanel(); bindSettingsEvents(); } });
   });
+}
+
+// ============================================================
+// EXTENSIONS PANEL SLOT
+// ============================================================
+
+function createExtSlot() {
+  const container = document.getElementById("extensions_settings2");
+  if (!container) {
+    console.warn("[FAB] Extensions settings container not found. Slot skipped.");
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.id = "fab-ext-slot";
+  wrapper.classList.add("extension_container");
+  wrapper.innerHTML = `
+    <div class="inline-drawer">
+      <div class="inline-drawer-toggle inline-drawer-header">
+        <div class="inline-drawer-icon fa-solid fa-diamond" style="color:#c9b3ff"></div>
+        <span class="inline-drawer-title">${EXT_DISPLAY}</span>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+      </div>
+      <div class="inline-drawer-content" style="display:none">
+        <div id="fab-ext-status" class="fab-ext-info"></div>
+        <div class="fab-ext-actions">
+          <input id="fab-ext-btn-open" class="menu_button" type="button" value="📋 시트 열기">
+          <input id="fab-ext-btn-scan" class="menu_button" type="button" value="↻ 재스캔">
+        </div>
+        <hr>
+        <div class="fab-ext-quick">
+          <label class="checkbox_label">
+            <input type="checkbox" id="fab-ext-chk-hide">
+            <span>채팅에서 <tableEdit> 숨기기</span>
+          </label>
+          <label class="checkbox_label">
+            <input type="checkbox" id="fab-ext-chk-inject">
+            <span>AI에 테이블 데이터 전달</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.appendChild(wrapper);
+
+  // Toggle drawer
+  wrapper.querySelector(".inline-drawer-toggle").addEventListener("click", function () {
+    const content = wrapper.querySelector(".inline-drawer-content");
+    const arrow = wrapper.querySelector(".inline-drawer-icon.down");
+    const isOpen = content.style.display !== "none";
+    content.style.display = isOpen ? "none" : "block";
+    if (arrow) arrow.classList.toggle("fa-circle-chevron-down", isOpen);
+    if (arrow) arrow.classList.toggle("fa-circle-chevron-up", !isOpen);
+  });
+
+  // Open panel
+  document.getElementById("fab-ext-btn-open").addEventListener("click", () => {
+    if (!panelOpen) togglePanel();
+  });
+
+  // Rescan
+  document.getElementById("fab-ext-btn-scan").addEventListener("click", scanAll);
+
+  // Quick toggles
+  const hideChk = document.getElementById("fab-ext-chk-hide");
+  hideChk.checked = getSettings().hideTableEdit;
+  hideChk.addEventListener("change", () => {
+    getSettings().hideTableEdit = hideChk.checked;
+    saveSettings();
+  });
+
+  const injectChk = document.getElementById("fab-ext-chk-inject");
+  injectChk.checked = getSettings().injectEnabled;
+  injectChk.addEventListener("change", () => {
+    getSettings().injectEnabled = injectChk.checked;
+    saveSettings();
+    updateExtSlot();
+  });
+
+  updateExtSlot();
+}
+
+function updateExtSlot() {
+  const statusEl = document.getElementById("fab-ext-status");
+  if (!statusEl) return;
+
+  const settings = getSettings();
+  const schema = settings.schema;
+  const tables = getTables();
+  const totalRows = Object.values(tables).reduce((sum, t) => sum + (t.rows?.length || 0), 0);
+  const enabledCount = Object.values(settings.injectTables).filter(v => v).length;
+
+  statusEl.innerHTML = `
+    <div class="fab-ext-row"><span>테이블</span><span>${schema.length}개 (${totalRows}행)</span></div>
+    <div class="fab-ext-row"><span>AI 참조</span><span style="color:${settings.injectEnabled ? "#66bb6a" : "#ef5350"}">${settings.injectEnabled ? `✅ ON (${enabledCount}/${schema.length})` : "❌ OFF"}</span></div>
+    <div class="fab-ext-row"><span>삽입 깊이</span><span>${settings.injectDepth}</span></div>
+  `;
+
+  // Sync quick toggles
+  const hideChk = document.getElementById("fab-ext-chk-hide");
+  if (hideChk) hideChk.checked = settings.hideTableEdit;
+  const injectChk = document.getElementById("fab-ext-chk-inject");
+  if (injectChk) injectChk.checked = settings.injectEnabled;
+}
+
+// ============================================================
+// WAND MENU (EXTENSIONS ACTION)
+// ============================================================
+
+function registerWandAction() {
+  const wandContainer = document.getElementById("extensionsMenu");
+  if (!wandContainer) {
+    // Fallback: try to listen for wand menu creation
+    const observer = new MutationObserver((mutations, obs) => {
+      const wand = document.getElementById("extensionsMenu");
+      if (wand) {
+        obs.disconnect();
+        addWandButton(wand);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return;
+  }
+  addWandButton(wandContainer);
+}
+
+function addWandButton(container) {
+  // Avoid duplicates
+  if (document.getElementById("fab-wand-btn")) return;
+
+  const btn = document.createElement("div");
+  btn.id = "fab-wand-btn";
+  btn.classList.add("list-group-item", "flex-container", "flexGap5");
+  btn.innerHTML = `<span class="fa-solid fa-diamond" style="color:#c9b3ff"></span> FAB 시트 열기`;
+  btn.addEventListener("click", () => {
+    if (!panelOpen) togglePanel();
+    // Close wand menu
+    const menu = btn.closest(".openDrawer, #extensionsMenu");
+    if (menu) menu.classList.remove("openDrawer");
+  });
+
+  container.appendChild(btn);
 }
 
 // ============================================================
@@ -608,10 +531,12 @@ function applyPanelWidth() {
 }
 
 function createUI() {
+  // Floating toggle button
   const btn = document.createElement("div");
   btn.id = "fab-btn"; btn.innerHTML = "⟐"; btn.title = "Flow & Brand 시트";
   document.body.appendChild(btn);
 
+  // Side panel
   const panel = document.createElement("div");
   panel.id = "fab-panel";
   panel.innerHTML = `
@@ -636,10 +561,8 @@ function createUI() {
   panel.querySelectorAll(".fab-tab").forEach(tab => {
     tab.addEventListener("click", () => {
       panel.querySelectorAll(".fab-tab").forEach(t => t.classList.remove("active"));
-      tab.classList.add("active");
-      currentTab = tab.dataset.tab;
-      refreshPanel();
-      if (currentTab === "settings") bindSettingsEvents();
+      tab.classList.add("active"); currentTab = tab.dataset.tab;
+      refreshPanel(); if (currentTab === "settings") bindSettingsEvents();
     });
   });
 }
@@ -653,8 +576,7 @@ function togglePanel() {
 }
 
 function refreshPanel() {
-  const el = document.getElementById("fab-content");
-  if (!el) return;
+  const el = document.getElementById("fab-content"); if (!el) return;
   switch (currentTab) {
     case "character": el.innerHTML = renderCharacter(); break;
     case "inventory": el.innerHTML = renderInventory(); break;
@@ -671,10 +593,13 @@ function refreshPanel() {
 
 jQuery(async () => {
   createUI();
+  createExtSlot();
+  registerWandAction();
+
   eventSource.on(event_types.GENERATION_STARTED, () => { injectPrompt(); });
   eventSource.on(event_types.MESSAGE_RECEIVED, (idx) => { const ctx = getContext(); const msg = ctx.chat[idx]; if (msg && msg.mes) processMsg(msg.mes); setTimeout(hideBlocks, 300); });
   eventSource.on(event_types.MESSAGE_EDITED, () => { scanAll(); setTimeout(hideBlocks, 300); });
   eventSource.on(event_types.CHAT_CHANGED, () => { setTimeout(() => { scanAll(); hideBlocks(); }, 1000); });
   setTimeout(() => { scanAll(); hideBlocks(); }, 2000);
-  console.log("[FAB] Flow & Brand TRPG Sheet v1.2 loaded.");
+  console.log(`[FAB] ${EXT_DISPLAY} v1.3 loaded.`);
 });
