@@ -1223,39 +1223,30 @@ function updateExtSlot() {
 // ============================================================
 
 function registerWandAction() {
-  // 즉시 시도
-  tryAddWand();
-
-  // 1초 후 재시도 (ST 초기화 완료 대기)
-  setTimeout(tryAddWand, 1000);
-  setTimeout(tryAddWand, 3000);
-  setTimeout(tryAddWand, 5000);
-
-  // fallback: 요술봉 클릭 이벤트 감지
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("#extensionsMenuButton, #extensionsMenu")) {
-      setTimeout(tryAddWand, 100);
+  const wand = document.getElementById("extensionsMenu");
+  if (wand) {
+    addWandButton(wand);
+    return;
+  }
+  const obs = new MutationObserver((_, o) => {
+    const w = document.getElementById("extensionsMenu");
+    if (w) {
+      o.disconnect();
+      addWandButton(w);
     }
   });
+  obs.observe(document.body, { childList: true, subtree: true });
 }
-
-function tryAddWand() {
-  const menu = document.getElementById("extensionsMenu");
-  if (!menu) return;
+function addWandButton(c) {
   if (document.getElementById("fab-wand-btn")) return;
-
-  const btn = document.createElement("div");
-  btn.id = "fab-wand-btn";
-  btn.classList.add("list-group-item", "flex-container", "flexGap5", "interactable");
-  btn.tabIndex = 0;
-  btn.setAttribute("role", "listitem");
-  btn.innerHTML = `<div class="fa-solid fa-diamond fa-fw extensionsMenuExtensionButton" style="color:var(--fab-accent)"></div><span>FAB 시트</span>`;
-
-  btn.addEventListener("click", () => {
+  const b = document.createElement("div");
+  b.id = "fab-wand-btn";
+  b.classList.add("list-group-item", "flex-container", "flexGap5");
+  b.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent)"></span> FAB 시트`;
+  b.addEventListener("click", () => {
     if (!panelOpen) togglePanel();
   });
-
-  menu.appendChild(btn);
+  c.appendChild(b);
 }
 
 
