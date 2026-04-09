@@ -1,5 +1,5 @@
 /* ============================================================
-   FAB SHEET v4.1 — DESIGNED CARD SYSTEM + CROSS-TABLE
+   FAB SHEET v4 — DESIGNED CARD SYSTEM
    ============================================================ */
 
    :root {
@@ -98,10 +98,6 @@
   }
   .fab-section-name { font-size: 13px; font-weight: 600; color: var(--fab-text); }
   .fab-section-count { font-size: 10px; color: var(--fab-text-muted); margin-left: 4px; }
-  .fab-section-cross {
-    font-size: 10px; color: var(--fab-accent); background: var(--fab-accent-light);
-    padding: 1px 5px; border-radius: 4px; font-weight: 700;
-  }
   .fab-section-right { display: flex; align-items: center; gap: 8px; }
   .fab-section-mode { font-size: 9px; color: #c0c0cc; }
   .fab-section-arrow { color: var(--fab-text-muted); font-size: 11px; transition: transform .2s; }
@@ -192,62 +188,6 @@
   .fab-pf-stat-val { font-weight: 600; color: var(--fab-text); }
   
   /* ============================================================
-     CROSS-TABLE SECTIONS (inside profile card)
-     ============================================================ */
-  .fab-pf-cross-section {
-    margin-top: 12px; padding-top: 10px;
-    border-top: 1px solid var(--fab-border);
-  }
-  .fab-pf-cross-header {
-    display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
-  }
-  .fab-pf-cross-icon { font-size: 12px; }
-  .fab-pf-cross-title {
-    font-size: 11px; font-weight: 700; color: var(--fab-accent);
-    letter-spacing: .3px;
-  }
-  .fab-pf-cross-count {
-    font-size: 9px; color: var(--fab-text-muted);
-    background: #f0f0f6; padding: 1px 6px; border-radius: 8px;
-    font-weight: 600;
-  }
-  .fab-pf-cross-body {
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  
-  /* Cross: grid-style items */
-  .fab-pf-cross-item {
-    background: #fafafc; border: 1px solid #eeeef4; border-radius: 8px;
-    padding: 8px 10px; transition: border-color .15s;
-  }
-  .fab-pf-cross-item:hover { border-color: var(--fab-accent-border); }
-  .fab-pf-cross-field {
-    display: flex; align-items: flex-start; gap: 6px; padding: 2px 0;
-  }
-  .fab-pf-cross-label {
-    font-size: 9px; font-weight: 700; color: var(--fab-text-muted);
-    min-width: 44px; padding: 2px 5px; background: #f0f0f6;
-    border-radius: 3px; text-align: center; flex-shrink: 0;
-  }
-  .fab-pf-cross-val {
-    font-size: 11px; color: var(--fab-text); line-height: 1.5;
-    word-break: break-word; flex: 1;
-  }
-  
-  /* Cross: log-style items */
-  .fab-pf-cross-log {
-    background: #fafafc; border: 1px solid #eeeef4; border-radius: 6px;
-    padding: 8px 10px; transition: border-color .15s;
-  }
-  .fab-pf-cross-log:hover { border-color: var(--fab-accent-border); }
-  .fab-pf-cross-log-title {
-    font-size: 11px; font-weight: 600; color: var(--fab-text); margin-bottom: 2px;
-  }
-  .fab-pf-cross-log-detail {
-    font-size: 10px; color: var(--fab-text-sub); line-height: 1.4; margin-bottom: 3px;
-  }
-  
-  /* ============================================================
      TEMPLATE: LOG
      ============================================================ */
   .fab-logs { display: flex; flex-direction: column; gap: 6px; }
@@ -279,7 +219,7 @@
   .fab-log-status.fail { background: #fdedec; color: #c0392b; }
   
   /* ============================================================
-     TEMPLATE: GRID
+     TEMPLATE: GRID (소지품/전투 등)
      ============================================================ */
   .fab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .fab-grid-item {
@@ -382,7 +322,6 @@
   .fab-schema-name { flex: 1; background: #f7f7fa; border: 1px solid #d0d0d8; color: var(--fab-text); padding: 6px 10px; border-radius: 6px; font-size: 12px; }
   .fab-schema-name:focus { outline: none; border-color: var(--fab-accent); }
   .fab-schema-mode-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .fab-schema-cross-row { margin-bottom: 8px; padding: 6px 0; }
   .fab-schema-tpl-row { margin: 8px 0; }
   .fab-schema-tpl-label { font-size: 10px; color: #888899; margin-bottom: 4px; }
   .fab-schema-tpl-input {
@@ -446,68 +385,4 @@
   .fab-ext-quick .checkbox_label { font-size: 12px; }
   #fab-wand-btn { cursor: pointer; padding: 8px 12px; font-size: 13px; }
   #fab-wand-btn:hover { background: rgba(0,0,0,.04); }
-
-  /* 크로스 테이블 프로필 — 그리드 아이템 */
-.fab-pf-cross-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 4px 0;
-}
-.fab-pf-cross-item {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 6px;
-  padding: 6px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 120px;
-  flex: 1 1 140px;
-}
-.fab-pf-cross-name {
-  font-weight: 600;
-  font-size: 0.85em;
-  color: var(--fab-accent, #6c5ce7);
-}
-.fab-pf-cross-grade {
-  font-size: 0.75em;
-  opacity: 0.7;
-  font-weight: 500;
-}
-.fab-pf-cross-detail {
-  font-size: 0.78em;
-  opacity: 0.6;
-}
-.fab-pf-cross-effect {
-  font-size: 0.75em;
-  color: var(--fab-accent, #6c5ce7);
-  opacity: 0.8;
-}
-
-/* 크로스 테이블 프로필 — 로그 아이템 */
-.fab-pf-cross-logs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 0;
-}
-.fab-pf-cross-log {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  background: rgba(255,255,255,0.03);
-  border-radius: 4px;
-  flex-wrap: wrap;
-}
-.fab-pf-cross-log-title {
-  font-weight: 600;
-  font-size: 0.83em;
-}
-.fab-pf-cross-log-meta {
-  font-size: 0.75em;
-  opacity: 0.5;
-}
-
   
