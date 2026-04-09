@@ -446,4 +446,68 @@
   .fab-ext-quick .checkbox_label { font-size: 12px; }
   #fab-wand-btn { cursor: pointer; padding: 8px 12px; font-size: 13px; }
   #fab-wand-btn:hover { background: rgba(0,0,0,.04); }
+
+  /* 크로스 테이블 프로필 — 그리드 아이템 */
+.fab-pf-cross-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.fab-pf-cross-item {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  flex: 1 1 140px;
+}
+.fab-pf-cross-name {
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--fab-accent, #6c5ce7);
+}
+.fab-pf-cross-grade {
+  font-size: 0.75em;
+  opacity: 0.7;
+  font-weight: 500;
+}
+.fab-pf-cross-detail {
+  font-size: 0.78em;
+  opacity: 0.6;
+}
+.fab-pf-cross-effect {
+  font-size: 0.75em;
+  color: var(--fab-accent, #6c5ce7);
+  opacity: 0.8;
+}
+
+/* 크로스 테이블 프로필 — 로그 아이템 */
+.fab-pf-cross-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+.fab-pf-cross-log {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  flex-wrap: wrap;
+}
+.fab-pf-cross-log-title {
+  font-weight: 600;
+  font-size: 0.83em;
+}
+.fab-pf-cross-log-meta {
+  font-size: 0.75em;
+  opacity: 0.5;
+}
+
   
