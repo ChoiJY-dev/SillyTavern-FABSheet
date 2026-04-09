@@ -8,14 +8,15 @@ const SETTINGS_KEY = "fabSheet";
 
 const DEFAULT_SCHEMA = [
   { name: "시공간", columns: ["날짜", "시간", "위치", "등장인물"] },
-  { name: "캐릭터", columns: ["인물", "능력치", "외형", "성격", "기타"] },
+  { name: "캐릭터", columns: ["인물", "외형", "성격", "기타"] },
+  { name: "능력치", columns: ["인물", "능력치명", "수치"] },
   { name: "관계", columns: ["인물", "대상", "관계", "상세"] },
   { name: "특성/마법", columns: ["인물", "분류", "계열", "유형", "이름", "상세"] },
   { name: "소지품", columns: ["인물", "아이템", "상세", "효과"] },
   { name: "스토리라인", columns: ["인물", "유형", "내용", "위치", "상태"] },
 ];
 
-const DEFAULT_COLORS = { accent: "#6c5ce7" };
+const DEFAULT_COLORS = { accent: "#b8860b" };
 
 // ── SETTINGS ──
 
@@ -146,13 +147,14 @@ Tables: ${enabled.join(", ")}
 
 IMPORTANT — Character data is split across multiple tables linked by column 0 "인물" (exact character name).
 T0=scene (시공간)
-T1=basic profile (인물/능력치/외형/성격/기타). 능력치 format: "KEY:VAL/KEY:VAL" (e.g. "COR:4/SEN:7/VOL:9/COD:5")
-T2=relationships (one row per directed pair: 인물/대상/관계/상세)
-T3=traits+magic+abilities (one row per entry: 인물/분류/계열/유형/이름/상세). 분류=특성|마법|의식|능력. 계열=school/lineage. 유형=기본|확장|etc.
-T4=inventory (one row per item: 인물/아이템/상세/효과)
-T5=storyline (one row per entry: 인물/유형/내용/위치/상태). 유형=임무|이벤트|전투 or free text.
+T1=basic profile (인물/외형/성격/기타)
+T2=ability stats (one row per stat per character: 인물/능력치명/수치). e.g. "네이","COR","4"
+T3=relationships (one row per directed pair: 인물/대상/관계/상세)
+T4=traits+magic+abilities (one row per entry: 인물/분류/계열/유형/이름/상세). 분류=특성|마법|능력. 계열=school/lineage. 유형=기본|확장|etc.
+T5=inventory (one row per item: 인물/아이템/상세/효과)
+T6=storyline (one row per entry: 인물/유형/내용/위치/상태). 유형=임무|전투 or free text.
 
-When adding a new character: insert into T1 + relevant rows in T2/T3/T4.
+When adding a new character: insert into T1 + stat rows in T2 + relevant rows in T3/T4/T5.
 Include <tableEdit> ONLY when data actually changes. Place AFTER narrative.\n`;
   return p;
 }
@@ -180,8 +182,8 @@ async function aiGenerate(instruction, mode) {
     if (text) chat += `[${msg.is_user ? "User" : "Char"}]: ${text.substring(0,600)}\n`;
   }
   const sys = mode === "setup"
-    ? `Data assistant. Analyze chat history and populate ALL tables with accurate data.\n\nSchema:\n${data}\nRecent Chat:\n${chat||"(none)"}\n\nRULES:\n- Output ONLY <tableEdit> block. Nothing else.\n- T0: scene info.\n- T1: one row per character. Col 1 "능력치" format: "KEY:VAL/KEY:VAL" (e.g. "COR:4/SEN:7/VOL:9").\n- T2: one row per DIRECTED relationship pair. Col 0=source character, Col 1=target character, Col 2=relationship label, Col 3=detail.\n- T3: one row per trait/spell/ritual/ability. Col 1 "분류"=특성|마법|의식|능력. Col 2 "계열"=school/lineage. Col 3 "유형"=기본|확장|etc. Col 4 "이름". Col 5 "상세".\n- T4: one row per inventory item.\n- T5: one row per storyline entry. Col 1 "유형"=임무|이벤트|전투.\n- Link ALL rows by Col 0 "인물" (exact name match).\n- NO empty rows. Be thorough — extract every character, relationship, trait, item, and plot point from the chat.`
-    : `Data assistant. Generate table edit commands based on instruction.\n\nCurrent Schema+Data:\n${data}\n${chat ? `Recent Chat:\n${chat}` : ""}\n\nRULES:\n- Output ONLY <tableEdit> block.\n- T0=scene, T1=profile(능력치 as "KEY:VAL/KEY:VAL"), T2=relationships(per directed pair), T3=traits/magic(분류→계열→유형→이름→상세), T4=inventory, T5=storyline(임무/이벤트/전투).\n- Link by Col 0 "인물". NO empty rows.`;
+    ? `Data assistant. Analyze chat history and populate ALL tables with accurate data.\n\nSchema:\n${data}\nRecent Chat:\n${chat||"(none)"}\n\nRULES:\n- Output ONLY <tableEdit> block. Nothing else.\n- T0: scene info.\n- T1: one row per character (인물/외형/성격/기타). No 능력치 here.\n- T2: one row per stat per character. Col 0=인물, Col 1=능력치명, Col 2=수치 (e.g. "네이","COR","4").\n- T3: one row per DIRECTED relationship pair. Col 0=source character, Col 1=target character, Col 2=relationship label, Col 3=detail.\n- T4: one row per trait/spell/ability. Col 1 "분류"=특성|마법|능력. Col 2 "계열"=school/lineage. Col 3 "유형"=기본|확장|etc. Col 4 "이름". Col 5 "상세".\n- T5: one row per inventory item.\n- T6: one row per storyline entry. Col 1 "유형"=임무|전투.\n- Link ALL rows by Col 0 "인물" (exact name match).\n- NO empty rows. Be thorough — extract every character, relationship, trait, item, and plot point from the chat.`
+    : `Data assistant. Generate table edit commands based on instruction.\n\nCurrent Schema+Data:\n${data}\n${chat ? `Recent Chat:\n${chat}` : ""}\n\nRULES:\n- Output ONLY <tableEdit> block.\n- T0=scene, T1=profile(인물/외형/성격/기타), T2=ability stats(one row per stat: 인물/능력치명/수치), T3=relationships(per directed pair), T4=traits/magic(분류→계열→유형→이름→상세), T5=inventory, T6=storyline(임무|전투).\n- Link by Col 0 "인물". NO empty rows.`;
   try { return await generateRaw(instruction,"",false,false,sys); }
   catch { try { return await generateRaw(sys+"\n\n"+instruction,""); } catch { return null; } }
 }
@@ -289,7 +291,8 @@ function renderCharacterSheets() {
   const invIdx = findTableIdx("소지품");
   const invTable = getTableByIdx(invIdx);
 
-  const statColIdx = charTable.columns.findIndex(c => c.includes("능력치"));
+  const statIdx = findTableIdx("능력치");
+  const statTable = getTableByIdx(statIdx);
 
   let h = "";
   for (let ri = 0; ri < charTable.rows.length; ri++) {
@@ -305,29 +308,26 @@ function renderCharacterSheets() {
       </div>
       <div class="fab-cs-body" id="fab-tbody-char-${ri}" style="display:none;">`;
 
-    // ── STATS ──
-    if (statColIdx >= 0) {
-      const statsRaw = (row[statColIdx]||"").trim();
-      if (statsRaw) {
-        const stats = parseStats(statsRaw);
-        if (stats && stats.length > 0) {
-          h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">⬡</span>능력치</div><div class="fab-stat-grid">`;
-          for (const s of stats) {
-            h += `<div class="fab-stat-cell"><div class="fab-stat-key">${esc(s.key)}</div><div class="fab-stat-val">${esc(s.val)}</div></div>`;
+    // ── STATS (from 능력치 table) ──
+    if (statTable) {
+      const statRows = filterByChar(statTable, name);
+      if (statRows.length) {
+        h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">⬡</span>능력치</div><div class="fab-stat-grid">`;
+        for (const sr of statRows) {
+          const sKey = (sr[1]||"").trim();
+          const sVal = (sr[2]||"").trim();
+          if (sKey || sVal) {
+            h += `<div class="fab-stat-cell"><div class="fab-stat-key">${esc(sKey)}</div><div class="fab-stat-val">${esc(sVal)}</div></div>`;
           }
-          h += `</div></div>`;
-        } else {
-          h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">⬡</span>능력치</div>
-            <div class="fab-cs-field"><span class="fab-cs-val">${esc(statsRaw)}</span></div></div>`;
         }
+        h += `</div></div>`;
       }
     }
 
-    // ── BASIC FIELDS (skip 인물 col 0 and 능력치 col) ──
+    // ── BASIC FIELDS (skip 인물 col 0) ──
     let hasBasic = false;
     let basicH = `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">📋</span>기본 정보</div>`;
     for (let ci = 1; ci < charTable.columns.length; ci++) {
-      if (ci === statColIdx) continue;
       const val = (row[ci]||"").trim();
       if (!val) continue;
       hasBasic = true;
@@ -336,7 +336,7 @@ function renderCharacterSheets() {
     basicH += `</div>`;
     if (hasBasic) h += basicH;
 
-    // ── RELATIONSHIPS (T2) ──
+    // ── RELATIONSHIPS (T3) ──
     if (relTable) {
       const rels = filterByChar(relTable, name);
       if (rels.length) {
@@ -352,49 +352,52 @@ function renderCharacterSheets() {
       }
     }
 
-    // ── TRAITS / MAGIC (T3) — 분류 → 계열 → 유형 hierarchy ──
+    // ── TRAITS / MAGIC (T4) — 분류 → 계열 → 유형 hierarchy, skip 의식 ──
     if (traitTable) {
       const traits = filterByChar(traitTable, name);
       if (traits.length) {
         const classMap = {};
         for (const t of traits) {
           const cls = (t[1]||"기타").trim();
+          if (cls.toLowerCase().includes("의식")) continue;
           const lineage = (t[2]||"미분류").trim();
           if (!classMap[cls]) classMap[cls] = {};
           if (!classMap[cls][lineage]) classMap[cls][lineage] = [];
           classMap[cls][lineage].push(t);
         }
 
-        h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">✦</span>특성 / 마법</div>`;
+        if (Object.keys(classMap).length) {
+          h += `<div class="fab-cs-sec"><div class="fab-cs-sec-t"><span class="fab-cs-sec-i">✦</span>특성 / 마법</div>`;
 
-        for (const [cls, lineages] of Object.entries(classMap)) {
-          h += `<div class="fab-trait-cls"><div class="fab-trait-cls-hd">${esc(cls)}</div>`;
+          for (const [cls, lineages] of Object.entries(classMap)) {
+            h += `<div class="fab-trait-cls"><div class="fab-trait-cls-hd">${esc(cls)}</div>`;
 
-          for (const [lineage, entries] of Object.entries(lineages)) {
-            h += `<div class="fab-trait-line"><div class="fab-trait-line-hd">${esc(lineage)}</div><div class="fab-trait-entries">`;
+            for (const [lineage, entries] of Object.entries(lineages)) {
+              h += `<div class="fab-trait-line"><div class="fab-trait-line-hd">${esc(lineage)}</div><div class="fab-trait-entries">`;
 
-            for (const e of entries) {
-              const typeBadge = (e[3]||"").trim();
-              const tName = (e[4]||"").trim();
-              const tDesc = (e[5]||"").trim();
-              h += `<div class="fab-trait-entry">`;
-              if (typeBadge) h += `<span class="fab-trait-badge">${esc(typeBadge)}</span>`;
-              if (tName) h += `<span class="fab-trait-name">${esc(tName)}</span>`;
-              if (tDesc) h += `<span class="fab-trait-desc">${esc(tDesc)}</span>`;
-              h += `</div>`;
+              for (const e of entries) {
+                const typeBadge = (e[3]||"").trim();
+                const tName = (e[4]||"").trim();
+                const tDesc = (e[5]||"").trim();
+                h += `<div class="fab-trait-entry">`;
+                if (typeBadge) h += `<span class="fab-trait-badge">${esc(typeBadge)}</span>`;
+                if (tName) h += `<span class="fab-trait-name">${esc(tName)}</span>`;
+                if (tDesc) h += `<span class="fab-trait-desc">${esc(tDesc)}</span>`;
+                h += `</div>`;
+              }
+
+              h += `</div></div>`;
             }
 
-            h += `</div></div>`;
+            h += `</div>`;
           }
 
           h += `</div>`;
         }
-
-        h += `</div>`;
       }
     }
 
-    // ── INVENTORY (T4) ──
+    // ── INVENTORY (T5) ──
     if (invTable) {
       const items = filterByChar(invTable, name);
       if (items.length) {
@@ -416,7 +419,7 @@ function renderCharacterSheets() {
 }
 
 // ============================================================
-// RENDER — STORYLINE (T5)
+// RENDER — STORYLINE (T6)
 // ============================================================
 
 function renderStoryline() {
@@ -425,11 +428,13 @@ function renderStoryline() {
   if (!t || !t.rows.length) return '<div class="fab-empty">기록 없음</div>';
 
   let h = '<div class="fab-logs">';
+  let hasRows = false;
   for (const row of t.rows) {
     const type = (row[1]||"").trim().toLowerCase();
+    if (type.includes("이벤트") || type.includes("event")) continue;
+    hasRows = true;
     let badge = "etc";
     if (type.includes("임무") || type.includes("mission") || type.includes("quest")) badge = "mission";
-    else if (type.includes("이벤트") || type.includes("event")) badge = "event";
     else if (type.includes("전투") || type.includes("combat") || type.includes("battle")) badge = "combat";
 
     const status = (row[4]||"").trim().toLowerCase();
@@ -448,6 +453,7 @@ function renderStoryline() {
     if ((row[4]||"").trim()) h += `<span class="fab-log-status ${sc}">${esc(row[4])}</span>`;
     h += `</div></div></div>`;
   }
+  if (!hasRows) return '<div class="fab-empty">기록 없음</div>';
   return h+'</div>';
 }
 
@@ -487,7 +493,7 @@ function renderOverview() {
 
   // Any remaining tables not covered above
   const rendered = new Set();
-  const knownNames = ["시공간","캐릭터","관계","특성/마법","특성","마법","소지품","스토리라인","스토리"];
+  const knownNames = ["시공간","캐릭터","능력치","관계","특성/마법","특성","마법","소지품","스토리라인","스토리"];
   for (let i = 0; i < schema.length; i++) {
     if (knownNames.some(kw => schema[i].name.includes(kw))) { rendered.add(i); continue; }
   }
