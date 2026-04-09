@@ -1219,37 +1219,26 @@ function updateExtSlot() {
 }
 
 // ============================================================
-// WAND — 요술봉 메뉴 (재생성 대응)
+// WAND MENU
 // ============================================================
 
 function registerWandAction() {
-  // 방법 1: 요술봉 메뉴가 열릴 때마다 버튼 주입
-  // SillyTavern은 요술봉 클릭 시 매번 팝오버를 새로 그림
-  const WAND_SELECTORS = [
-    "#extensionsMenu",
-    "#extensions_wand_container",
-    ".extensions_block .list-group",
-  ];
-
-  function tryInjectWand() {
-    for (const sel of WAND_SELECTORS) {
-      const container = document.querySelector(sel);
-      if (container && !document.getElementById("fab-wand-btn")) {
-        addWandButton(container);
-        return true;
-      }
-    }
-    return false;
+  // 즉시 시도
+  const wand = document.getElementById("extensionsMenu");
+  if (wand) {
+    addWandButton(wand);
+    return;
   }
 
-  // 초기 시도
-  if (tryInjectWand()) return;
-
-  // 팝오버가 동적 생성될 때마다 재주입 (disconnect 안 함)
-  const obs = new MutationObserver(() => {
-    tryInjectWand();
+  // DOM 감시 — disconnect 하지 않음
+  // SillyTavern의 요술봉은 팝오버로 매번 새로 생성될 수 있음
+  const observer = new MutationObserver(() => {
+    const w = document.getElementById("extensionsMenu");
+    if (w && !document.getElementById("fab-wand-btn")) {
+      addWandButton(w);
+    }
   });
-  obs.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function addWandButton(container) {
@@ -1257,54 +1246,55 @@ function addWandButton(container) {
   const btn = document.createElement("div");
   btn.id = "fab-wand-btn";
   btn.classList.add("list-group-item", "flex-container", "flexGap5");
-  btn.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent, #6c5ce7)"></span> FAB 시트`;
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
+  btn.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent, #6c5ce7)"></span> FAB 시트 열기`;
+  btn.addEventListener("click", () => {
     if (!panelOpen) togglePanel();
-    // 요술봉 팝오버 닫기 시도
-    const popup = container.closest(".popup, .tooltip, [data-popper-placement]");
-    if (popup) popup.remove();
   });
   container.appendChild(btn);
 }
 
 // ============================================================
-// EXT SLOT — 확장 설정 패널 (다중 컨테이너 탐색)
+// EXT SLOT
 // ============================================================
 
 function createExtSlot() {
-  const SETTINGS_SELECTORS = [
-    "#extensions_settings2",
-    "#extensions_settings",
-    "#extensions-settings-panel",
-    ".extensions_block",
-  ];
-
+  // 다중 셀렉터로 컨테이너 탐색
+  const selectors = ["#extensions_settings2", "#extensions_settings"];
   let container = null;
-  for (const sel of SETTINGS_SELECTORS) {
+  for (const sel of selectors) {
     container = document.querySelector(sel);
     if (container) break;
   }
 
   if (!container) {
-    // 컨테이너를 못 찾으면 지연 재시도
-    console.warn("[FAB] Extension settings container not found. Retrying in 3s...");
-    setTimeout(createExtSlot, 3000);
+    // 못 찾으면 2초 후 한 번 더 시도
+    setTimeout(() => {
+      for (const sel of selectors) {
+        container = document.querySelector(sel);
+        if (container) break;
+      }
+      if (container && !document.getElementById("fab-ext-slot")) {
+        buildExtSlot(container);
+      }
+    }, 2000);
     return;
   }
 
-  // 중복 방지
   if (document.getElementById("fab-ext-slot")) {
     updateExtSlot();
     return;
   }
 
+  buildExtSlot(container);
+}
+
+function buildExtSlot(container) {
   const wrapper = document.createElement("div");
   wrapper.id = "fab-ext-slot";
   wrapper.classList.add("extension_container");
   wrapper.innerHTML = `<div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
-      <div class="inline-drawer-icon fa-solid fa-diamond" style="color:var(--fab-accent, #6c5ce7)"></div>
+      <div class="inline-drawer-icon fa-solid fa-diamond" style="color:var(--fab-accent)"></div>
       <span class="inline-drawer-title">${EXT_DISPLAY}</span>
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
@@ -1322,15 +1312,14 @@ function createExtSlot() {
   </div>`;
   container.appendChild(wrapper);
 
-  // 드로어 토글
   wrapper.querySelector(".inline-drawer-toggle").addEventListener("click", function () {
-    const content = wrapper.querySelector(".inline-drawer-content");
-    const arrow = wrapper.querySelector(".inline-drawer-icon.down");
-    const isOpen = content.style.display !== "none";
-    content.style.display = isOpen ? "none" : "block";
-    if (arrow) {
-      arrow.classList.toggle("fa-circle-chevron-down", isOpen);
-      arrow.classList.toggle("fa-circle-chevron-up", !isOpen);
+    const c = wrapper.querySelector(".inline-drawer-content");
+    const a = wrapper.querySelector(".inline-drawer-icon.down");
+    const o = c.style.display !== "none";
+    c.style.display = o ? "none" : "block";
+    if (a) {
+      a.classList.toggle("fa-circle-chevron-down", o);
+      a.classList.toggle("fa-circle-chevron-up", !o);
     }
   });
 
@@ -1356,7 +1345,6 @@ function createExtSlot() {
 
   updateExtSlot();
 }
-
 // ============================================================
 // FLOATING BUTTON — 가시성 보장
 // ============================================================
@@ -1433,43 +1421,12 @@ function ensureFloatingButtonVisible() {
 }
 
 // ============================================================
-// INIT — 수정된 초기화
+// INIT
 // ============================================================
 
 jQuery(async () => {
   createUI();
-
-  // 확장 설정 슬롯: DOM 준비 대기 후 생성
-  const waitForSettings = () => {
-    const selectors = [
-      "#extensions_settings2",
-      "#extensions_settings",
-      ".extensions_block",
-    ];
-    for (const sel of selectors) {
-      if (document.querySelector(sel)) return true;
-    }
-    return false;
-  };
-
-  if (waitForSettings()) {
-    createExtSlot();
-  } else {
-    // DOM이 아직 준비 안 된 경우 대기
-    const settingsObs = new MutationObserver((_, obs) => {
-      if (waitForSettings()) {
-        obs.disconnect();
-        createExtSlot();
-      }
-    });
-    settingsObs.observe(document.body, { childList: true, subtree: true });
-    // 안전 타임아웃
-    setTimeout(() => {
-      settingsObs.disconnect();
-      createExtSlot();
-    }, 10000);
-  }
-
+  createExtSlot();
   registerWandAction();
   applyColors();
 
