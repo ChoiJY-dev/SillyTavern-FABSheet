@@ -7,59 +7,19 @@ const META_KEY = "fabSheetData";
 const SETTINGS_KEY = "fabSheet";
 
 // ============================================================
-// DISPLAY MODES & DEFAULT TEMPLATES
+// DISPLAY MODES
 // ============================================================
 
 const DISPLAY_MODES = ["timeline", "profile", "log", "grid", "table", "custom"];
 
-// Built-in row templates per mode. {{0}}, {{1}}, etc. = column values
-// These are per-ROW templates. The mode wrapper is handled in code.
-const BUILTIN_TEMPLATES = {
-  timeline: `<div class="fab-tl-item">
-  <div class="fab-tl-row1">
-    <span class="fab-tl-date">{{0}}</span>
-    <span class="fab-tl-time">{{1}}</span>
-  </div>
-  <div class="fab-tl-row2">
-    <span class="fab-tl-loc">{{2}}</span>
-  </div>
-  <div class="fab-tl-chars">{{3}}</div>
-</div>`,
-
-  profile: `<div class="fab-pf">
-  <div class="fab-pf-banner"></div>
-  <div class="fab-pf-inner">
-    <div class="fab-pf-header">
-      <div class="fab-pf-avatar">{{initial}}</div>
-      <div class="fab-pf-name">{{0}}</div>
-    </div>
-    <div class="fab-pf-body">{{fields}}</div>
-  </div>
-</div>`,
-
-  log: `<div class="fab-log">
-  <div class="fab-log-icon {{iconClass}}">{{iconLetter}}</div>
-  <div class="fab-log-content">
-    <div class="fab-log-title">{{0}} — {{1}}</div>
-    <div class="fab-log-detail">{{detail}}</div>
-    <div class="fab-log-meta">{{meta}}</div>
-  </div>
-</div>`,
-
-  grid: `<div class="fab-grid-item">
-  <div class="fab-grid-owner">{{0}}</div>
-  <div class="fab-grid-name">{{1}}</div>
-  <div class="fab-grid-detail">{{2}}</div>
-  <div class="fab-grid-effect">{{3}}</div>
-</div>`,
-};
-
 const DEFAULT_SCHEMA = [
   { name: "시공간", columns: ["날짜", "시간", "위치", "등장인물"], displayMode: "timeline", template: "" },
-  { name: "캐릭터", columns: ["인물", "신체적특징", "성격", "관계", "특성", "기타"], displayMode: "profile", template: "" },
+  { name: "캐릭터", columns: ["인물", "신체적특징", "성격", "직업", "거주지", "기타"], displayMode: "profile", template: "", crossTable: true },
+  { name: "관계", columns: ["인물", "대상", "관계유형", "태도", "호감도"], displayMode: "grid", template: "" },
+  { name: "특성", columns: ["인물", "특성명", "계열", "효과"], displayMode: "grid", template: "" },
   { name: "임무", columns: ["인물", "임무", "위치", "기간", "상태"], displayMode: "log", template: "" },
-  { name: "이벤트", columns: ["인물", "이벤트/의식", "날짜", "위치", "결과"], displayMode: "log", template: "" },
-  { name: "소지품/전투", columns: ["소유자", "아이템/전투", "상세", "효과/상태"], displayMode: "grid", template: "" },
+  { name: "의식/이벤트", columns: ["인물", "이벤트/의식", "날짜", "위치", "결과"], displayMode: "log", template: "" },
+  { name: "소지품", columns: ["인물", "아이템", "상세", "효과"], displayMode: "grid", template: "" },
 ];
 
 const DEFAULT_COLORS = { accent: "#6c5ce7", tableIdx: "#6c5ce7", insert: "#27ae60", update: "#b7791f", delete: "#e74c3c" };
@@ -83,6 +43,7 @@ function getSettings() {
     if (s.injectTables[i] === undefined) s.injectTables[i] = true;
     if (!s.schema[i].displayMode) s.schema[i].displayMode = "table";
     if (s.schema[i].template === undefined) s.schema[i].template = "";
+    if (s.schema[i].crossTable === undefined) s.schema[i].crossTable = false;
   }
   for (const k of Object.keys(s.injectTables)) { if (parseInt(k) >= s.schema.length) delete s.injectTables[k]; }
   if (s.injectEnabled === undefined) s.injectEnabled = true;
@@ -267,7 +228,7 @@ function hideBlocks() {
   document.querySelectorAll(".mes_text").forEach(el => {
     if (el.dataset.fabProcessed) return; el.dataset.fabProcessed = "true";
     const html = el.innerHTML;
-    const cleaned = html.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "");
+    const cleaned = html.replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "");
     if (cleaned !== html) el.innerHTML = cleaned;
   });
 }
@@ -276,7 +237,77 @@ function hideBlocks() {
 // DESIGNED RENDERERS
 // ============================================================
 
-function esc(s) { return (s || "").replace(/&/g, "&").replace(/</g, "<").replace(/>/g, ">"); }
+function esc(s) {
+  return (s || "")
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, """);
+}
+
+// ---------- CROSS-TABLE LOOKUP ----------
+
+function findCrossRows(characterName, tableIndex) {
+  const tables = getTables();
+  const table = tables[tableIndex];
+  if (!table || !table.rows.length) return [];
+  const name = (characterName || "").trim().toLowerCase();
+  if (!name) return [];
+  return table.rows.filter(row => {
+    const rowName = (row[0] || "").trim().toLowerCase();
+    return rowName === name || rowName.includes(name) || name.includes(rowName);
+  });
+}
+
+function renderCrossSection(characterName, tableIndex, sectionTitle, sectionIcon) {
+  const schema = getSchema();
+  const tables = getTables();
+  const table = tables[tableIndex];
+  if (!table) return "";
+  const rows = findCrossRows(characterName, tableIndex);
+  if (!rows.length) return "";
+
+  const mode = schema[tableIndex]?.displayMode || "grid";
+  let h = `<div class="fab-pf-cross-section">`;
+  h += `<div class="fab-pf-cross-header"><span class="fab-pf-cross-icon">${sectionIcon}</span><span class="fab-pf-cross-title">${esc(sectionTitle)}</span><span class="fab-pf-cross-count">${rows.length}</span></div>`;
+  h += `<div class="fab-pf-cross-body">`;
+
+  if (mode === "log") {
+    for (const row of rows) {
+      const cols = table.columns;
+      const lastIdx = cols.length - 1;
+      const statusVal = (row[lastIdx] || "").trim().toLowerCase();
+      let statusClass = "done";
+      if (statusVal.includes("active") || statusVal.includes("진행") || statusVal.includes("성공")) statusClass = "active";
+      else if (statusVal.includes("fail") || statusVal.includes("실패")) statusClass = "fail";
+      let detail = [];
+      for (let ci = 2; ci < lastIdx; ci++) {
+        const v = (row[ci] || "").trim();
+        if (v) detail.push(v);
+      }
+      h += `<div class="fab-pf-cross-log">
+        <div class="fab-pf-cross-log-title">${esc(row[1] || "")}</div>
+        ${detail.length ? `<div class="fab-pf-cross-log-detail">${detail.map(d => esc(d)).join(" · ")}</div>` : ""}
+        ${(row[lastIdx] || "").trim() ? `<span class="fab-log-status ${statusClass}">${esc(row[lastIdx])}</span>` : ""}
+      </div>`;
+    }
+  } else {
+    for (const row of rows) {
+      h += `<div class="fab-pf-cross-item">`;
+      for (let ci = 1; ci < table.columns.length; ci++) {
+        const val = (row[ci] || "").trim();
+        if (!val) continue;
+        h += `<div class="fab-pf-cross-field"><span class="fab-pf-cross-label">${esc(table.columns[ci])}</span><span class="fab-pf-cross-val">${esc(val)}</span></div>`;
+      }
+      h += `</div>`;
+    }
+  }
+
+  h += `</div></div>`;
+  return h;
+}
+
+// ---------- MAIN RENDER DISPATCH ----------
 
 function renderDesigned(tableIndex) {
   const tables = getTables(); const schema = getSchema();
@@ -287,15 +318,12 @@ function renderDesigned(tableIndex) {
   const mode = schemaEntry?.displayMode || "table";
   const customTpl = (schemaEntry?.template || "").trim();
 
-  // Custom template: user-provided per-row HTML
   if (mode === "custom" && customTpl) return renderCustomTemplate(table, customTpl);
-
-  // Custom template override for built-in modes
   if (customTpl) return renderCustomTemplate(table, customTpl);
 
   switch (mode) {
     case "timeline": return renderTimeline(table);
-    case "profile": return renderProfile(table);
+    case "profile": return renderProfile(table, tableIndex);
     case "log": return renderLog(table, schemaEntry);
     case "grid": return renderGrid(table);
     default: return renderPlainTable(table);
@@ -330,14 +358,35 @@ function renderTimeline(table) {
   return h + '</div>';
 }
 
-// ---------- PROFILE ----------
-function renderProfile(table) {
-  let h = '<div class="fab-profiles">';
-  const tagColumns = new Set();
-  for (const colName of table.columns) {
-    const lower = colName.toLowerCase();
-    if (["관계", "특성", "태그", "trait", "relation", "tag", "tags"].some(k => lower.includes(k))) tagColumns.add(table.columns.indexOf(colName));
+// ---------- PROFILE (with cross-table) ----------
+function renderProfile(table, tableIndex) {
+  const schema = getSchema();
+  const isCrossEnabled = schema[tableIndex]?.crossTable === true;
+
+  const crossMap = [];
+  if (isCrossEnabled) {
+    for (let i = 0; i < schema.length; i++) {
+      if (i === tableIndex) continue;
+      const s = schema[i];
+      const tables = getTables();
+      const t = tables[i];
+      if (!t || !t.columns.length) continue;
+      const firstCol = t.columns[0].toLowerCase();
+      if (firstCol.includes("인물") || firstCol.includes("소유자") || firstCol === "name" || firstCol === "character") {
+        let icon = "📋";
+        const nameLower = s.name.toLowerCase();
+        if (nameLower.includes("관계") || nameLower.includes("relation")) icon = "🤝";
+        else if (nameLower.includes("특성") || nameLower.includes("trait")) icon = "✦";
+        else if (nameLower.includes("임무") || nameLower.includes("mission")) icon = "🎯";
+        else if (nameLower.includes("의식") || nameLower.includes("이벤트") || nameLower.includes("event") || nameLower.includes("ritual")) icon = "⚡";
+        else if (nameLower.includes("소지품") || nameLower.includes("item") || nameLower.includes("equip")) icon = "🎒";
+        else if (nameLower.includes("전투") || nameLower.includes("combat")) icon = "⚔";
+        crossMap.push({ tableIdx: i, name: s.name, icon });
+      }
+    }
   }
+
+  let h = '<div class="fab-profiles">';
   const statRegex = /^([A-Z가-힣]+)\s*:\s*(.+)$/;
 
   for (const row of table.rows) {
@@ -353,7 +402,6 @@ function renderProfile(table) {
       if (!val) continue;
       const colName = table.columns[ci];
 
-      // Check for stat-like values: "COR:4/SEN:7/VOL:9"
       const statParts = val.split("/").map(s => s.trim()).filter(Boolean);
       const isStats = statParts.length >= 2 && statParts.every(p => statRegex.test(p));
 
@@ -364,13 +412,14 @@ function renderProfile(table) {
           if (sm) h += `<div class="fab-pf-stat"><span class="fab-pf-stat-key">${esc(sm[1])}</span><span class="fab-pf-stat-val">${esc(sm[2])}</span></div>`;
         }
         h += '</div>';
-      } else if (tagColumns.has(ci)) {
-        h += `<div class="fab-pf-divider">${esc(colName)}</div><div class="fab-pf-tags">`;
-        const parts = val.split(/[,/;·→]/).map(s => s.trim()).filter(Boolean);
-        for (const part of parts) h += `<span class="fab-pf-tag">${esc(part)}</span>`;
-        h += '</div>';
       } else {
         h += `<div class="fab-pf-field"><span class="fab-pf-label">${esc(colName)}</span><span class="fab-pf-val">${esc(val)}</span></div>`;
+      }
+    }
+
+    if (isCrossEnabled) {
+      for (const cross of crossMap) {
+        h += renderCrossSection(name, cross.tableIdx, cross.name, cross.icon);
       }
     }
 
@@ -395,7 +444,6 @@ function renderLog(table, schemaEntry) {
     if (statusVal.includes("active") || statusVal.includes("진행") || statusVal.includes("성공")) statusClass = "active";
     else if (statusVal.includes("fail") || statusVal.includes("실패")) statusClass = "fail";
 
-    // Detail = columns 2 to (last-1)
     let detail = [];
     for (let ci = 2; ci < lastIdx; ci++) {
       const v = (row[ci] || "").trim();
@@ -425,7 +473,6 @@ function renderGrid(table) {
     if (row[1]) h += `<div class="fab-grid-name">${esc(row[1])}</div>`;
     if (row[2]) h += `<div class="fab-grid-detail">${esc(row[2])}</div>`;
     if (row[3]) h += `<div class="fab-grid-effect">${esc(row[3])}</div>`;
-    // 4+ columns
     for (let ci = 4; ci < table.columns.length; ci++) {
       if ((row[ci] || "").trim()) h += `<div class="fab-grid-detail">${esc(table.columns[ci])}: ${esc(row[ci])}</div>`;
     }
@@ -460,9 +507,10 @@ function renderOverview() {
     const t = tables[i]; if (!t) continue;
     const rc = t.rows?.length || 0;
     const mode = schema[i].displayMode || "table";
+    const crossLabel = schema[i].crossTable ? ' <span class="fab-section-cross">⊕</span>' : "";
     h += `<div class="fab-section">
       <div class="fab-section-header" data-action="toggle-table" data-idx="${i}">
-        <span class="fab-section-left"><span class="fab-section-idx">${i}</span><span class="fab-section-name">${esc(t.name)}</span><span class="fab-section-count">${rc}건</span></span>
+        <span class="fab-section-left"><span class="fab-section-idx">${i}</span><span class="fab-section-name">${esc(t.name)}</span>${crossLabel}<span class="fab-section-count">${rc}건</span></span>
         <span class="fab-section-right"><span class="fab-section-mode">${modeLabels[mode] || mode}</span><span class="fab-section-arrow" id="fab-arrow-${i}">▸</span></span>
       </div>
       <div class="fab-section-body" id="fab-tbody-${i}" style="display:none;">${renderDesigned(i)}</div>
@@ -532,11 +580,12 @@ function renderSettings() {
       <div class="fab-schema-toggle" data-action="toggle-schema" data-idx="${i}">
         <span class="fab-schema-arrow" id="fab-sarrow-${i}">▸</span><span class="fab-schema-idx">${i}</span>
         <span class="fab-schema-preview-name">${esc(s.name)}</span>
-        <span class="fab-schema-preview-cols">${s.columns.length}컬럼 · ${modeLabels[s.displayMode] || s.displayMode}</span>
+        <span class="fab-schema-preview-cols">${s.columns.length}컬럼 · ${modeLabels[s.displayMode] || s.displayMode}${s.crossTable ? " · ⊕합산" : ""}</span>
       </div>
       <div class="fab-schema-detail" id="fab-sdetail-${i}" style="display:none;">
         <div class="fab-schema-head"><input type="text" class="fab-schema-name" value="${esc(s.name)}" data-schema-name-idx="${i}" placeholder="테이블 이름"><button class="fab-ab2" data-action="del-table" data-idx="${i}">✕</button></div>
         <div class="fab-schema-mode-row"><span class="fab-set-label" style="margin:0">표시 모드</span><select class="fab-set-select" data-mode-idx="${i}">${DISPLAY_MODES.map(m => `<option value="${m}" ${s.displayMode === m ? "selected" : ""}>${modeLabels[m]}</option>`).join("")}</select></div>
+        <div class="fab-schema-cross-row"><label class="fab-set-chk"><input type="checkbox" data-cross-idx="${i}" ${s.crossTable ? "checked" : ""}><span>⊕ 크로스 테이블 합산 (프로필 모드)</span></label></div>
         <div class="fab-schema-tpl-row">
           <div class="fab-schema-tpl-label">행 템플릿 (비워두면 기본 디자인 사용)</div>
           <textarea class="fab-schema-tpl-input" data-tpl-idx="${i}" rows="4" placeholder="<div>{{0}} — {{1}}</div>">${esc(s.template || "")}</textarea>
@@ -552,7 +601,7 @@ function renderSettings() {
   h += `<div class="fab-schema-actions"><button class="fab-set-btn" data-action="add-table">+ 테이블</button><button class="fab-set-btn primary" data-action="save-schema">저장</button><button class="fab-set-btn danger" data-action="reset-schema">기본값 복원</button></div></div>`;
 
   h += `<div class="fab-card"><div class="fab-ch">📋 JSON</div>
-    <div class="fab-set-hint">형식: [{"name":"이름","columns":["컬럼"],"displayMode":"profile","template":""}]</div>
+    <div class="fab-set-hint">형식: [{"name":"이름","columns":["컬럼"],"displayMode":"profile","template":"","crossTable":false}]</div>
     <textarea id="fab-json-input" class="fab-json-textarea" rows="6"></textarea>
     <div class="fab-json-actions"><button class="fab-set-btn primary" data-action="json-apply">적용</button><button class="fab-set-btn" data-action="json-export">내보내기</button></div>
     <div id="fab-json-status" class="fab-gen-status"></div></div>`;
@@ -650,7 +699,7 @@ function setupDelegation() {
         break;
       }
       case "add-table": {
-        const schema = getSchema(); schema.push({ name: `Table ${schema.length}`, columns: ["Column1"], displayMode: "table", template: "" });
+        const schema = getSchema(); schema.push({ name: `Table ${schema.length}`, columns: ["Column1"], displayMode: "table", template: "", crossTable: false });
         getSettings().injectTables[schema.length - 1] = true; setSchema(schema); refreshPanel();
         break;
       }
@@ -659,6 +708,7 @@ function setupDelegation() {
         document.querySelectorAll("[data-schema-name-idx]").forEach(input => { const idx = parseInt(input.dataset.schemaNameIdx); if (schema[idx]) schema[idx].name = input.value.trim() || `Table ${idx}`; });
         document.querySelectorAll("[data-mode-idx]").forEach(sel => { const idx = parseInt(sel.dataset.modeIdx); if (schema[idx]) schema[idx].displayMode = sel.value; });
         document.querySelectorAll("[data-tpl-idx]").forEach(ta => { const idx = parseInt(ta.dataset.tplIdx); if (schema[idx]) schema[idx].template = ta.value; });
+        document.querySelectorAll("[data-cross-idx]").forEach(chk => { const idx = parseInt(chk.dataset.crossIdx); if (schema[idx]) schema[idx].crossTable = chk.checked; });
         for (let i = 0; i < schema.length; i++) { const cols = []; document.querySelectorAll(`[data-col-ti="${i}"]`).forEach(input => { const v = input.value.trim(); if (v) cols.push(v); }); if (cols.length) schema[i].columns = cols; }
         setSchema(schema); getTables(); saveTables(); injectPrompt(); updateExtSlot();
         alert("저장 완료."); refreshPanel();
@@ -675,7 +725,7 @@ function setupDelegation() {
           if (!Array.isArray(parsed)) throw new Error("배열 필요");
           for (let i = 0; i < parsed.length; i++) if (!parsed[i].name || !parsed[i].columns?.length) throw new Error(`항목 ${i} 오류`);
           if (!confirm(`${parsed.length}개 테이블로 교체?`)) break;
-          const ns = parsed.map(t => ({ name: String(t.name), columns: t.columns.map(c => String(c)), displayMode: DISPLAY_MODES.includes(t.displayMode) ? t.displayMode : "table", template: t.template || "" }));
+          const ns = parsed.map(t => ({ name: String(t.name), columns: t.columns.map(c => String(c)), displayMode: DISPLAY_MODES.includes(t.displayMode) ? t.displayMode : "table", template: t.template || "", crossTable: !!t.crossTable }));
           const s = getSettings(); s.schema = ns; s.injectTables = {};
           for (let i = 0; i < ns.length; i++) s.injectTables[i] = true;
           saveSettings(); getTables(); saveTables(); injectPrompt(); updateExtSlot();
@@ -856,5 +906,5 @@ jQuery(async () => {
   eventSource.on(event_types.MESSAGE_EDITED, () => { scanAll(); setTimeout(hideBlocks, 300); });
   eventSource.on(event_types.CHAT_CHANGED, () => setTimeout(() => { scanAll(); hideBlocks(); }, 1000));
   setTimeout(() => { scanAll(); hideBlocks(); }, 2000);
-  console.log(`[FAB] ${EXT_DISPLAY} v4.0 loaded.`);
+  console.log(`[FAB] ${EXT_DISPLAY} v4.1 loaded.`);
 });
