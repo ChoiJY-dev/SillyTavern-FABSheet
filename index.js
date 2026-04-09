@@ -1,22 +1,21 @@
 import { getContext, saveMetadataDebounced, extension_settings } from "../../../extensions.js";
-import { eventSource, event_types } from "../../../../script.js";
+import { eventSource, event_types, generateRaw } from "../../../../script.js";
 
 const EXT = "flow-and-brand-sheet";
-const EXT_DISPLAY = "Flow & Brand TRPG Sheet";
+const EXT_DISPLAY = "Flow & Brand Sheet";
 const META_KEY = "fabSheetData";
 const SETTINGS_KEY = "fabSheet";
 
 // ============================================================
-// DEFAULT SCHEMA
+// DEFAULT SCHEMA (Generic)
 // ============================================================
 
 const DEFAULT_SCHEMA = [
-  { name: "시공간", columns: ["날짜", "시간", "위치", "등장 인물"] },
-  { name: "캐릭터 시트", columns: ["인물", "신체적 특징", "성격", "직업", "취미", "좋아하는 것", "거주지", "기타 중요 정보"] },
-  { name: "관계", columns: ["인물", "관계", "태도", "호감도"] },
-  { name: "임무/특성", columns: ["인물", "임무 or 특성", "위치 or 계열", "기간 or 효과"] },
-  { name: "이벤트/의식", columns: ["인물", "이벤트/의식", "날짜", "위치", "감정/결과"] },
-  { name: "소지품/전투", columns: ["소유자", "아이템/전투", "상세", "효과/상태"] },
+  { name: "Scene", columns: ["Date", "Time", "Location", "Characters"] },
+  { name: "Characters", columns: ["Name", "Description", "Notes"] },
+  { name: "Relationships", columns: ["From", "To", "Type", "Level"] },
+  { name: "Events", columns: ["Character", "Event", "Details", "Status"] },
+  { name: "Inventory", columns: ["Owner", "Item", "Details", "Status"] },
 ];
 
 // ============================================================
@@ -134,12 +133,20 @@ function scanAll() {
   resetTables();
   for (const msg of ctx.chat) { if (msg.mes) { const ops = parseEdits(msg.mes); if (ops.length > 0) applyOps(ops); } }
   saveTables(); refreshPanel(); updateExtSlot();
-  console.log("[FAB] Full scan complete.");
 }
 
 // ============================================================
 // SYSTEM PROMPT INJECTION
 // ============================================================
+
+function buildSchemaDescription() {
+  const schema = getSchema();
+  let desc = "";
+  for (let i = 0; i < schema.length; i++) {
+    desc += `Table ${i}: "${schema[i].name}" — Columns: ${schema[i].columns.map((c, ci) => `[${ci}]${c}`).join(", ")}\n`;
+  }
+  return desc;
+}
 
 function buildPrompt() {
   const settings = getSettings();
@@ -148,7 +155,7 @@ function buildPrompt() {
   const enabled = Object.entries(settings.injectTables).filter(([_, v]) => v).map(([k]) => parseInt(k)).sort((a, b) => a - b);
   if (enabled.length === 0) return "";
 
-  let p = "\n[FAB TRPG Data Tables — Current State]\n";
+  let p = "\n[FAB Sheet — Current Data]\n";
   p += `(Injected tables: ${enabled.join(", ")})\n`;
   for (const idx of enabled) {
     const table = tables[idx]; if (!table) continue;
@@ -187,6 +194,80 @@ function injectPrompt() {
 }
 
 // ============================================================
+// AI GENERATION FEATURE
+// ============================================================
+
+async function aiGenerate(userInstruction) {
+  const schema = getSchema();
+  const tables = getTables();
+
+  let currentData = "";
+  for (let i = 0; i < schema.length; i++) {
+    const t = tables[i]; if (!t) continue;
+    currentData += `Table ${i}: "${t.name}" — Columns: ${t.columns.map((c, ci) => `[${ci}]${c}`).join(", ")}\n`;
+    if (t.rows.length > 0) {
+      for (let ri = 0; ri < t.rows.length; ri++) {
+        currentData += `  [${ri}] ${t.columns.map((_, ci) => t.rows[ri][ci] || "").join(" | ")}\n`;
+      }
+    } else {
+      currentData += "  (empty)\n";
+    }
+  }
+
+  // Gather recent chat context
+  const ctx = getContext();
+  let chatContext = "";
+  if (ctx.chat && ctx.chat.length > 0) {
+    const recent = ctx.chat.slice(-10);
+    for (const msg of recent) {
+      const role = msg.is_user ? "User" : "Character";
+      const text = (msg.mes || "").replace(/<tableEdit>[\s\S]*?<\/tableEdit>/gi, "").trim();
+      if (text) chatContext += `[${role}]: ${text.substring(0, 500)}\n`;
+    }
+  }
+
+  const systemPrompt = `You are a data assistant. Your ONLY job is to generate table edit commands based on the user's request.
+
+Current table schema and data:
+${currentData}
+
+${chatContext ? `Recent chat context:\n${chatContext}\n` : ""}
+
+Available commands:
+  insertRow(tableIndex, {colIndex: "value", ...})
+  updateRow(tableIndex, rowIndex, {colIndex: "newValue", ...})
+  deleteRow(tableIndex, rowIndex)
+
+RULES:
+- Output ONLY a <tableEdit> block. No other text.
+- Use the exact table indices and column indices from the schema above.
+- Fill in reasonable data based on the user's request and chat context.
+- If creating character sheets, use information visible in the chat context.
+
+Example output:
+<tableEdit>
+insertRow(1, {0: "CharName", 1: "Tall, dark hair", 2: "Some notes"})
+</tableEdit>`;
+
+  const userPrompt = userInstruction;
+
+  try {
+    const response = await generateRaw(userPrompt, "", false, false, systemPrompt);
+    return response;
+  } catch (e) {
+    console.error("[FAB] AI generation failed:", e);
+    // Fallback: try using generateRaw with different signature
+    try {
+      const response = await generateRaw(systemPrompt + "\n\nUser request: " + userPrompt, "");
+      return response;
+    } catch (e2) {
+      console.error("[FAB] AI generation fallback also failed:", e2);
+      return null;
+    }
+  }
+}
+
+// ============================================================
 // HIDE <tableEdit>
 // ============================================================
 
@@ -201,80 +282,55 @@ function hideBlocks() {
 }
 
 // ============================================================
-// RENDER HELPERS
+// RENDER — GENERIC TABLE VIEW
 // ============================================================
 
-function parseAttrs(s) { const r = {}; if (!s) return r; s.split("/").forEach(p => { const [k, v] = p.split(":"); if (k && v) r[k.trim()] = parseInt(v) || v.trim(); }); return r; }
-function parseDerived(s) { const r = {}; if (!s) return r; s.split("/").forEach(p => { const [k, v] = p.split(":"); if (!k || !v) return; const m = v.match(/(\d+)\((\d+)\)/); if (m) r[k.trim()] = { c: parseInt(m[1]), m: parseInt(m[2]) }; else { const n = parseInt(v) || 0; r[k.trim()] = { c: n, m: n }; } }); return r; }
-const ATTR_KR = { COR: "육신", SEN: "감응", VOL: "의지", COD: "지식", NEX: "연결" };
-function attrKr(k) { return ATTR_KR[k] || k; }
-function demClr(v) { return v <= 5 ? "#66bb6a" : v <= 10 ? "#fdd835" : v <= 15 ? "#ff9800" : v <= 19 ? "#ef5350" : "#333"; }
-function demGrd(v) { return v <= 5 ? "#2e7d32,#66bb6a" : v <= 10 ? "#f9a825,#fdd835" : v <= 15 ? "#ef6c00,#ff9800" : v <= 19 ? "#c62828,#ef5350" : "#1a1a1a,#333"; }
-function demStg(v) { return v <= 5 ? "불안" : v <= 10 ? "균열" : v <= 15 ? "침식" : v <= 19 ? "심연" : "붕괴"; }
-function grdClr(g) { return { D: "#888", C: "#4fc3f7", B: "#ab47bc", A: "#ffa726", S: "#ef5350" }[(g || "").toUpperCase()] || "#888"; }
-function trtClr(l) { const s = (l || "").toLowerCase(); return s.includes("확장") || s.includes("expanded") ? "#7733cc" : s.includes("변질") || s.includes("corrupted") ? "#cc3333" : "#3366cc"; }
-function trtLbl(l) { const s = (l || "").toLowerCase(); return s.includes("확장") || s.includes("expanded") ? "확장" : s.includes("변질") || s.includes("corrupted") ? "변질" : "기본"; }
-function stClr(s) { const l = (s || "").toLowerCase(); return l.includes("active") || l.includes("진행") ? "#66bb6a" : l.includes("complete") || l.includes("완료") ? "#4fc3f7" : l.includes("fail") || l.includes("실패") ? "#ef5350" : "#888"; }
-function stLbl(s) { const l = (s || "").toLowerCase(); return l.includes("active") || l.includes("진행") ? "진행중" : l.includes("complete") || l.includes("완료") ? "완료" : l.includes("fail") || l.includes("실패") ? "실패" : l.includes("cancel") || l.includes("취소") ? "취소" : s || "?"; }
-function pct(c, m) { return Math.round((c / Math.max(m, 1)) * 100); }
-function hpClr(c, m) { const r = m > 0 ? c / m : 0; return r > 0.5 ? "#66bb6a" : r > 0.25 ? "#ff9800" : "#ef5350"; }
+function renderTableView(tableIndex) {
+  const tables = getTables();
+  const table = tables[tableIndex];
+  if (!table) return `<div class="fab-empty">테이블 ${tableIndex} 없음</div>`;
+  if (table.rows.length === 0) return `<div class="fab-empty">${table.name}: 데이터 없음</div>`;
 
-// ============================================================
-// RENDER TABS
-// ============================================================
-
-function renderCharacter() {
-  const t = getTables(); const t1 = t[1], t2 = t[2], t3 = t[3];
-  if (!t1 || t1.rows.length === 0) return '<div class="fab-empty">캐릭터 데이터 없음</div>';
-  let h = "";
-  for (const row of t1.rows) {
-    const nm = row[0] || "?", at = parseAttrs(row[1]), dr = parseDerived(row[2]);
-    const jobs = row[3] || "?", magic = row[4] || "?", stage = row[5] || "?";
-    const affil = (row[6] || "?").replace(/\//g, " · "), other = row[7] || "";
-    const vit = dr.VIT || { c: 0, m: 1 }, ani = dr.ANI || { c: 0, m: 1 }, dem = dr.DEM || { c: 0, m: 20 }, dv = dem.c;
-    let status = "없음"; const sm = other.match(/[Ss]tatus:([^/]*)/i) || other.match(/상태:([^/]*)/i); if (sm) status = sm[1].trim() || "없음";
-    const traits = []; if (t3) for (const r of t3.rows) if ((r[0] || "").toLowerCase().includes(nm.toLowerCase()) && ((r[1] || "").startsWith("특성:") || (r[1] || "").startsWith("Trait:"))) traits.push({ name: (r[1] || "").replace(/^(특성:|Trait:)/, ""), lineage: r[2] || "", effect: r[3] || "" });
-    const rels = []; if (t2) for (const r of t2.rows) if ((r[0] || "").toLowerCase().includes(nm.toLowerCase())) rels.push({ dir: r[0] || "", att: r[2] || "", bond: parseInt(r[3]) || 0 });
-    h += `<div class="fab-card"><div class="fab-char-hd"><div class="fab-char-nm">${nm}</div><div class="fab-char-sub">${jobs} — ${stage}</div><div class="fab-char-af">${affil}</div></div><div class="fab-ag">${["COR", "SEN", "VOL", "COD", "NEX"].map(k => `<div class="fab-ab"><div class="fab-al">${attrKr(k)}</div><div class="fab-av">${at[k] || "?"}</div><div class="fab-ae">${k}</div></div>`).join("")}</div><div class="fab-bs"><div class="fab-bg"><div class="fab-bh"><span><span class="fab-ic" style="color:#66bb6a">♥</span> 생명력</span><span class="fab-bn">${vit.c}/${vit.m}</span></div><div class="fab-bt"><div class="fab-bf fab-vit" style="width:${pct(vit.c, vit.m)}%"></div></div></div><div class="fab-bg"><div class="fab-bh"><span><span class="fab-ic" style="color:#42a5f5">✦</span> 정신력</span><span class="fab-bn">${ani.c}/${ani.m}</span></div><div class="fab-bt"><div class="fab-bf fab-ani" style="width:${pct(ani.c, ani.m)}%"></div></div></div><div class="fab-bg"><div class="fab-bh"><span><span class="fab-ic" style="color:${demClr(dv)}">◆</span> 광기도 <span class="fab-dt" style="color:${demClr(dv)}">[${demStg(dv)}]</span></span><span class="fab-bn">${dv}/20</span></div><div class="fab-bt"><div class="fab-bf" style="width:${pct(dv, 20)}%;background:linear-gradient(90deg,${demGrd(dv)})"></div></div></div></div><div class="fab-sc"><div class="fab-sl">상태</div><span class="fab-tg">${status}</span></div>${traits.length > 0 ? `<div class="fab-sc"><div class="fab-st">⟐ 특성</div>${traits.map(t => `<div class="fab-tr"><span class="fab-tb" style="background:${trtClr(t.lineage)}">${trtLbl(t.lineage)}</span><span class="fab-tn">${t.name}</span><span class="fab-tl">${(t.lineage || "").split("/")[0]}</span></div><div class="fab-te">${t.effect}</div>`).join("")}</div>` : ""}${rels.length > 0 ? `<div class="fab-sc"><div class="fab-st">⟐ 인연</div>${rels.map(r => `<div class="fab-rr"><span class="fab-rn">${r.dir}</span><span class="fab-ra">${r.att}</span><div class="fab-bd">${Array.from({ length: 10 }, (_, i) => `<div class="fab-d ${i < r.bond ? "f" : ""}"></div>`).join("")}</div></div>`).join("")}</div>` : ""}<div class="fab-ft">마법 구현: <span class="fab-hl">${magic}</span></div></div>`;
+  let h = `<table class="fab-rt"><thead><tr><th class="fab-rth">#</th>`;
+  for (const col of table.columns) h += `<th class="fab-rth">${col}</th>`;
+  h += `</tr></thead><tbody>`;
+  for (let ri = 0; ri < table.rows.length; ri++) {
+    h += `<tr><td class="fab-rtd fab-ri">${ri}</td>`;
+    for (let ci = 0; ci < table.columns.length; ci++) {
+      h += `<td class="fab-rtd">${table.rows[ri][ci] || ""}</td>`;
+    }
+    h += `</tr>`;
   }
+  h += `</tbody></table>`;
   return h;
 }
 
-function renderInventory() {
-  const t = getTables(); const t1 = t[1], t5 = t[5];
-  if (!t1 || t1.rows.length === 0) return '<div class="fab-empty">데이터 없음</div>';
+function renderOverview() {
+  const tables = getTables();
+  const schema = getSchema();
   let h = "";
-  for (const cr of t1.rows) {
-    const cn = cr[0] || "?"; const items = [];
-    if (t5) for (const r of t5.rows) { const o = (r[0] || "").toLowerCase(), c1 = r[1] || ""; if (o.includes(cn.toLowerCase()) && (c1.startsWith("Equip:") || c1.startsWith("장비:"))) { const nm = c1.replace(/^(Equip:|장비:)/, "").trim(), pts = (r[2] || "").split("/"); items.push({ name: nm, grade: pts[0] || "?", type: pts[1] || "?", eq: (pts[2] || "").toUpperCase() === "Y", qty: parseInt(pts[3]) || 1, eff: r[3] || "" }); } }
-    h += `<div class="fab-card"><div class="fab-ch">⟐ ${cn} ⟐</div>${items.length === 0 ? '<div class="fab-empty">소지품 없음</div>' : items.map(i => `<div class="fab-ii${i.eq ? " eq" : ""}" style="border-left:3px solid ${grdClr(i.grade)}"><div class="fab-it"><div><span class="fab-in">${i.name}</span><span class="fab-ig" style="background:${grdClr(i.grade)}">${i.grade}</span></div><span class="fab-iq">x${i.qty}</span></div><div class="fab-ix"><span class="fab-iv">${i.type}</span><span class="fab-iv ${i.eq ? "teq" : "tuq"}">${i.eq ? "장착중" : "미장착"}</span></div><div class="fab-ie">${i.eff}</div></div>`).join("")}</div>`;
+
+  for (let i = 0; i < schema.length; i++) {
+    const t = tables[i];
+    if (!t) continue;
+    const rowCount = t.rows?.length || 0;
+
+    h += `<div class="fab-card">
+      <div class="fab-table-header" data-idx="${i}">
+        <span class="fab-table-title">
+          <span class="fab-table-idx">${i}</span>
+          ${t.name}
+          <span class="fab-table-count">${rowCount}행</span>
+        </span>
+        <span class="fab-table-arrow">▸</span>
+      </div>
+      <div class="fab-table-body" data-idx="${i}" style="display:none">
+        ${rowCount > 0 ? renderTableView(i) : '<div class="fab-empty">비어 있음</div>'}
+      </div>
+    </div>`;
   }
+
   return h;
-}
-
-function renderMissions() {
-  const t = getTables(); const t3 = t[3], t4 = t[4];
-  let h = '<div class="fab-card"><div class="fab-ch">⟐ 임무 기록 ⟐</div>';
-  const ms = []; if (t3) for (const r of t3.rows) { const c1 = (r[1] || "").toLowerCase(); if (c1.startsWith("mission:") || c1.startsWith("임무:")) ms.push({ char: r[0] || "", name: (r[1] || "").replace(/^(Mission:|임무:|mission:)/i, "").trim(), loc: r[2] || "", st: r[3] || "" }); }
-  h += ms.length === 0 ? '<div class="fab-empty">등록된 임무 없음</div>' : ms.map(m => `<div class="fab-mi" style="border-left:3px solid ${stClr(m.st)}"><div class="fab-mt"><span class="fab-mn">${m.name.replace(/_/g, " ")}</span><span class="fab-ms" style="background:${stClr(m.st)}">${stLbl(m.st)}</span></div><div class="fab-md">📍 ${m.loc.replace(/_/g, " ")} · 👤 ${m.char}</div></div>`).join("");
-  const evs = []; if (t4) for (const r of t4.rows) evs.push({ char: r[0] || "", sum: r[1] || "", date: r[2] || "", loc: r[3] || "", emo: r[4] || "" });
-  if (evs.length > 0) { h += '<div class="fab-st" style="margin-top:16px">⟐ 이벤트 ⟐</div>'; h += evs.map(e => `<div class="fab-ei" style="border-left:3px solid ${(e.sum.startsWith("Ritual:") || e.sum.startsWith("의식:")) ? "#ab47bc" : "#444477"}"><div class="fab-es">${e.sum.replace(/_/g, " ")}</div><div class="fab-ed">${e.char} · ${e.date} · ${(e.loc || "").replace(/_/g, " ")}</div>${e.emo ? `<div class="fab-ee">${e.emo.replace(/_/g, " ")}</div>` : ""}</div>`).join(""); }
-  return h + "</div>";
-}
-
-function renderStatus() {
-  const t = getTables(); const t0 = t[0], t1 = t[1], t3 = t[3], t5 = t[5];
-  const sc = t0 && t0.rows.length > 0 ? { date: t0.rows[0][0] || "?", time: t0.rows[0][1] || "?", loc: (t0.rows[0][2] || "?").replace(/_/g, " "), chars: (t0.rows[0][3] || "?").replace(/\//g, ", ") } : { date: "?", time: "?", loc: "?", chars: "?" };
-  let h = `<div class="fab-card"><div class="fab-sb"><span>📅 ${sc.date}</span><span>🕐 ${sc.time}</span><span>📍 ${sc.loc}</span></div><div class="fab-scc">등장: ${sc.chars}</div>`;
-  if (t1) for (const row of t1.rows) {
-    const nm = row[0] || "?", dr = parseDerived(row[2]), jobs = row[3] || "?", stage = row[5] || "?", other = row[7] || "";
-    const vit = dr.VIT || { c: 0, m: 1 }, ani = dr.ANI || { c: 0, m: 1 }, dem = dr.DEM || { c: 0, m: 20 }, dv = dem.c;
-    let status = "없음"; const sm = other.match(/[Ss]tatus:([^/]*)/i) || other.match(/상태:([^/]*)/i); if (sm) status = sm[1].trim() || "없음";
-    let mc = 0; if (t3) for (const r of t3.rows) { const c1 = (r[1] || "").toLowerCase(); if ((r[0] || "").toLowerCase().includes(nm.toLowerCase()) && (c1.startsWith("mission:") || c1.startsWith("임무:"))) mc++; }
-    let ic = 0; if (t5) for (const r of t5.rows) { const c1 = (r[1] || "").toLowerCase(); if ((r[0] || "").toLowerCase().includes(nm.toLowerCase()) && (c1.startsWith("equip:") || c1.startsWith("장비:"))) ic++; }
-    h += `<div class="fab-sr"><div class="fab-srt"><span class="fab-srn">${nm}</span><span class="fab-srs">${stage} — ${jobs}</span></div><div class="fab-ss"><span><span style="color:#66bb6a">♥</span> <span style="color:${hpClr(vit.c, vit.m)}">${vit.c}</span><span class="fab-dm">/${vit.m}</span></span><span><span style="color:#42a5f5">✦</span> ${ani.c}<span class="fab-dm">/${ani.m}</span></span><span><span style="color:${demClr(dv)}">◆</span> <span style="color:${demClr(dv)}">${dv}</span></span></div><div class="fab-smm"><span class="fab-sm">${status}</span><span class="fab-sm">임무:${mc}개</span><span class="fab-sm">장비:${ic}개</span></div></div>`;
-  }
-  return h + "</div>";
 }
 
 function renderRaw() {
@@ -285,25 +341,169 @@ function renderRaw() {
   return h;
 }
 
+// ============================================================
+// RENDER — AI GENERATE TAB
+// ============================================================
+
+function renderGenerate() {
+  return `<div class="fab-card">
+    <div class="fab-ch">🤖 AI 데이터 생성</div>
+    <div class="fab-gen-desc">현재 연결된 API를 사용하여 채팅 맥락에서 시트 데이터를 자동 생성합니다.</div>
+    <textarea id="fab-gen-input" class="fab-gen-textarea" placeholder="예: 현재 채팅에 등장하는 캐릭터들의 시트를 만들어줘
+예: 관계 테이블에 캐릭터 간 관계를 추가해줘
+예: 장면 정보를 최신 상태로 업데이트해줘" rows="4"></textarea>
+    <div class="fab-gen-actions">
+      <button id="fab-gen-run" class="fab-set-btn primary">생성 요청</button>
+    </div>
+    <div id="fab-gen-status" class="fab-gen-status"></div>
+    <div id="fab-gen-preview" class="fab-gen-preview"></div>
+  </div>`;
+}
+
+function bindGenerateEvents() {
+  const runBtn = document.getElementById("fab-gen-run");
+  if (!runBtn) return;
+
+  runBtn.addEventListener("click", async () => {
+    const input = document.getElementById("fab-gen-input");
+    const statusEl = document.getElementById("fab-gen-status");
+    const previewEl = document.getElementById("fab-gen-preview");
+    const instruction = (input?.value || "").trim();
+
+    if (!instruction) {
+      statusEl.innerHTML = '<span class="fab-gen-err">요청 내용을 입력해주세요.</span>';
+      return;
+    }
+
+    runBtn.disabled = true;
+    runBtn.value = "생성 중...";
+    statusEl.innerHTML = '<span class="fab-gen-loading">⏳ AI에 요청 중... 잠시 기다려주세요.</span>';
+    previewEl.innerHTML = "";
+
+    try {
+      const response = await aiGenerate(instruction);
+
+      if (!response) {
+        statusEl.innerHTML = '<span class="fab-gen-err">AI 응답을 받지 못했습니다. API 연결을 확인해주세요.</span>';
+        return;
+      }
+
+      const ops = parseEdits(response);
+
+      if (ops.length === 0) {
+        statusEl.innerHTML = '<span class="fab-gen-err">AI 응답에서 유효한 테이블 편집 명령을 찾지 못했습니다.</span>';
+        previewEl.innerHTML = `<div class="fab-gen-raw"><div class="fab-gen-raw-label">AI 원본 응답:</div><pre>${response.substring(0, 2000)}</pre></div>`;
+        return;
+      }
+
+      // Show preview
+      let previewHtml = `<div class="fab-gen-ops-label">감지된 명령 (${ops.length}개):</div>`;
+      for (const op of ops) {
+        if (op.type === "insert") previewHtml += `<div class="fab-gen-op insert">+ insertRow(${op.ti}, {...})</div>`;
+        else if (op.type === "update") previewHtml += `<div class="fab-gen-op update">~ updateRow(${op.ti}, ${op.ri}, {...})</div>`;
+        else if (op.type === "delete") previewHtml += `<div class="fab-gen-op delete">- deleteRow(${op.ti}, ${op.ri})</div>`;
+      }
+      previewHtml += `<div class="fab-gen-confirm-actions">
+        <button id="fab-gen-apply" class="fab-set-btn primary">적용</button>
+        <button id="fab-gen-cancel" class="fab-set-btn">취소</button>
+      </div>`;
+
+      statusEl.innerHTML = '<span class="fab-gen-ok">✅ 생성 완료. 미리보기를 확인하고 적용해주세요.</span>';
+      previewEl.innerHTML = previewHtml;
+
+      // Store ops for apply
+      previewEl.dataset.pendingOps = JSON.stringify(ops);
+
+      document.getElementById("fab-gen-apply")?.addEventListener("click", () => {
+        const pending = JSON.parse(previewEl.dataset.pendingOps || "[]");
+        applyOps(pending);
+        saveTables();
+        refreshPanel();
+        updateExtSlot();
+        // Re-render generate tab
+        const el = document.getElementById("fab-content");
+        if (el && currentTab === "generate") {
+          el.innerHTML = renderGenerate();
+          bindGenerateEvents();
+          const s = document.getElementById("fab-gen-status");
+          if (s) s.innerHTML = `<span class="fab-gen-ok">✅ ${pending.length}개 명령이 적용되었습니다.</span>`;
+        }
+      });
+
+      document.getElementById("fab-gen-cancel")?.addEventListener("click", () => {
+        previewEl.innerHTML = "";
+        statusEl.innerHTML = '<span class="fab-gen-info">취소되었습니다.</span>';
+      });
+
+    } catch (err) {
+      statusEl.innerHTML = `<span class="fab-gen-err">오류: ${err.message || err}</span>`;
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = "생성 요청";
+    }
+  });
+}
+
+// ============================================================
+// RENDER — SETTINGS (Collapsible + JSON Import)
+// ============================================================
+
 function renderSettings() {
   const settings = getSettings(); const schema = settings.schema;
-  let h = `<div class="fab-card"><div class="fab-ch">⚙ 일반 설정</div>
+
+  let h = `<div class="fab-card"><div class="fab-ch">⚙ 일반</div>
     <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-hide" ${settings.hideTableEdit ? "checked" : ""}><span>채팅에서 <tableEdit> 숨기기</span></label></div>
     <div class="fab-set-section"><div class="fab-set-label">패널 너비 (px)</div><input type="number" id="fab-opt-width" class="fab-set-input" value="${settings.panelWidth}" min="300" max="800" step="50"></div></div>`;
 
-  h += `<div class="fab-card"><div class="fab-ch">🧠 AI 참조 설정</div>
+  h += `<div class="fab-card"><div class="fab-ch">🧠 AI 참조</div>
     <div class="fab-set-section"><label class="fab-set-chk"><input type="checkbox" id="fab-opt-inject" ${settings.injectEnabled ? "checked" : ""}><span>테이블 데이터를 AI에 전달</span></label><div class="fab-set-hint">활성화하면 AI가 테이블 내용을 참고하여 응답합니다.</div></div>
-    <div id="fab-inject-tables" class="${settings.injectEnabled ? "" : "fab-disabled"}"><div class="fab-set-label">테이블별 주입 설정</div><div class="fab-set-hint">AI에 전달할 테이블을 개별적으로 선택합니다.</div>
+    <div id="fab-inject-tables" class="${settings.injectEnabled ? "" : "fab-disabled"}"><div class="fab-set-label">테이블별 주입</div>
     ${schema.map((s, i) => `<label class="fab-set-chk fab-inject-row"><input type="checkbox" class="fab-inject-table-chk" data-idx="${i}" ${settings.injectTables[i] ? "checked" : ""}><span><span class="fab-inject-idx">${i}</span> ${s.name}</span><span class="fab-inject-info">${s.columns.length}컬럼 · ${(getTables()[i]?.rows?.length || 0)}행</span></label>`).join("")}
     </div>
-    <div class="fab-set-section" style="margin-top:12px"><div class="fab-set-label">프롬프트 삽입 깊이</div><div class="fab-set-hint">숫자가 작을수록 최근 메시지에 가깝게 삽입됩니다.</div><input type="number" id="fab-opt-depth" class="fab-set-input" value="${settings.injectDepth}" min="0" max="999" step="1"></div></div>`;
+    <div class="fab-set-section" style="margin-top:12px"><div class="fab-set-label">삽입 깊이 (Depth)</div><div class="fab-set-hint">숫자가 작을수록 최근 메시지에 가깝게 삽입.</div><input type="number" id="fab-opt-depth" class="fab-set-input" value="${settings.injectDepth}" min="0" max="999" step="1"></div></div>`;
 
-  h += '<div class="fab-card"><div class="fab-ch">⟐ 테이블 스키마 편집 ⟐</div>';
+  // Schema editor — collapsible
+  h += `<div class="fab-card"><div class="fab-ch">📐 스키마 편집</div>`;
+
   for (let i = 0; i < schema.length; i++) {
     const s = schema[i];
-    h += `<div class="fab-schema-block" data-idx="${i}"><div class="fab-schema-head"><span class="fab-schema-idx">${i}</span><input type="text" class="fab-schema-name" value="${s.name}" data-idx="${i}" placeholder="테이블 이름"><button class="fab-schema-del-table fab-ab2" data-idx="${i}" title="테이블 삭제">✕</button></div><div class="fab-schema-cols">${s.columns.map((col, ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${col}" data-ti="${i}" data-ci="${ci}" placeholder="컬럼명"><button class="fab-schema-del-col fab-col-btn" data-ti="${i}" data-ci="${ci}" title="컬럼 삭제">−</button></div>`).join("")}<button class="fab-schema-add-col fab-col-btn add" data-ti="${i}">+ 컬럼 추가</button></div></div>`;
+    h += `<div class="fab-schema-block" data-idx="${i}">
+      <div class="fab-schema-toggle" data-idx="${i}">
+        <span class="fab-schema-arrow">▸</span>
+        <span class="fab-schema-idx">${i}</span>
+        <span class="fab-schema-preview-name">${s.name}</span>
+        <span class="fab-schema-preview-cols">${s.columns.length}컬럼</span>
+      </div>
+      <div class="fab-schema-detail" data-idx="${i}" style="display:none">
+        <div class="fab-schema-head">
+          <input type="text" class="fab-schema-name" value="${s.name}" data-idx="${i}" placeholder="테이블 이름">
+          <button class="fab-schema-del-table fab-ab2" data-idx="${i}" title="삭제">✕</button>
+        </div>
+        <div class="fab-schema-cols">
+          ${s.columns.map((col, ci) => `<div class="fab-schema-col-row"><input type="text" class="fab-schema-col" value="${col}" data-ti="${i}" data-ci="${ci}" placeholder="컬럼명"><button class="fab-schema-del-col fab-col-btn" data-ti="${i}" data-ci="${ci}">−</button></div>`).join("")}
+          <button class="fab-schema-add-col fab-col-btn add" data-ti="${i}">+ 컬럼</button>
+        </div>
+      </div>
+    </div>`;
   }
-  h += `<div class="fab-schema-actions"><button id="fab-add-table" class="fab-set-btn">+ 테이블 추가</button><button id="fab-save-schema" class="fab-set-btn primary">저장</button><button id="fab-reset-schema" class="fab-set-btn danger">기본값 복원</button></div></div>`;
+
+  h += `<div class="fab-schema-actions">
+    <button id="fab-add-table" class="fab-set-btn">+ 테이블</button>
+    <button id="fab-save-schema" class="fab-set-btn primary">저장</button>
+    <button id="fab-reset-schema" class="fab-set-btn danger">기본값 복원</button>
+  </div></div>`;
+
+  // JSON Import
+  h += `<div class="fab-card"><div class="fab-ch">📋 JSON 임포트</div>
+    <div class="fab-set-hint">JSON 배열을 붙여넣어 스키마를 일괄 교체합니다. 형식: [{"name":"이름","columns":["컬럼1","컬럼2"]}]</div>
+    <textarea id="fab-json-input" class="fab-json-textarea" rows="6" placeholder='[{"name":"Characters","columns":["Name","Desc","Notes"]}]'></textarea>
+    <div class="fab-json-actions">
+      <button id="fab-json-apply" class="fab-set-btn primary">JSON 적용</button>
+      <button id="fab-json-export" class="fab-set-btn">현재 스키마 내보내기</button>
+    </div>
+    <div id="fab-json-status" class="fab-gen-status"></div>
+  </div>`;
+
   return h;
 }
 
@@ -332,9 +532,23 @@ function bindSettingsEvents() {
   const depthOpt = document.getElementById("fab-opt-depth");
   if (depthOpt) depthOpt.addEventListener("change", () => { getSettings().injectDepth = parseInt(depthOpt.value) || 4; saveSettings(); });
 
+  // Schema toggle (collapsible)
+  document.querySelectorAll(".fab-schema-toggle").forEach(toggle => {
+    toggle.addEventListener("click", () => {
+      const idx = toggle.dataset.idx;
+      const detail = document.querySelector(`.fab-schema-detail[data-idx="${idx}"]`);
+      const arrow = toggle.querySelector(".fab-schema-arrow");
+      if (detail) {
+        const open = detail.style.display !== "none";
+        detail.style.display = open ? "none" : "block";
+        if (arrow) arrow.textContent = open ? "▸" : "▾";
+      }
+    });
+  });
+
   const addTable = document.getElementById("fab-add-table");
   if (addTable) addTable.addEventListener("click", () => {
-    const schema = getSchema(); schema.push({ name: `테이블 ${schema.length}`, columns: ["컬럼1"] });
+    const schema = getSchema(); schema.push({ name: `Table ${schema.length}`, columns: ["Column1"] });
     getSettings().injectTables[schema.length - 1] = true; setSchema(schema);
     refreshPanel(); bindSettingsEvents();
   });
@@ -342,7 +556,7 @@ function bindSettingsEvents() {
   const saveBtn = document.getElementById("fab-save-schema");
   if (saveBtn) saveBtn.addEventListener("click", () => {
     const schema = getSchema();
-    document.querySelectorAll(".fab-schema-name").forEach(input => { const idx = parseInt(input.dataset.idx); if (schema[idx]) schema[idx].name = input.value.trim() || `테이블 ${idx}`; });
+    document.querySelectorAll(".fab-schema-name").forEach(input => { const idx = parseInt(input.dataset.idx); if (schema[idx]) schema[idx].name = input.value.trim() || `Table ${idx}`; });
     for (let i = 0; i < schema.length; i++) { const cols = []; document.querySelectorAll(`.fab-schema-col[data-ti="${i}"]`).forEach(input => { const v = input.value.trim(); if (v) cols.push(v); }); if (cols.length > 0) schema[i].columns = cols; }
     setSchema(schema); getTables(); saveTables(); injectPrompt(); updateExtSlot();
     alert("스키마 저장 완료."); refreshPanel(); bindSettingsEvents();
@@ -355,7 +569,7 @@ function bindSettingsEvents() {
     btn.addEventListener("click", () => {
       const idx = parseInt(btn.dataset.idx); const schema = getSchema();
       if (schema.length <= 1) { alert("최소 1개의 테이블은 필요합니다."); return; }
-      if (confirm(`테이블 ${idx}: ${schema[idx].name}을(를) 삭제하시겠습니까?`)) {
+      if (confirm(`"${schema[idx].name}" 삭제?`)) {
         schema.splice(idx, 1);
         const ni = {}; for (let i = 0; i < schema.length; i++) { const oi = i >= idx ? i + 1 : i; ni[i] = getSettings().injectTables[oi] !== undefined ? getSettings().injectTables[oi] : true; }
         getSettings().injectTables = ni; setSchema(schema); refreshPanel(); bindSettingsEvents(); updateExtSlot();
@@ -364,11 +578,68 @@ function bindSettingsEvents() {
   });
 
   document.querySelectorAll(".fab-schema-add-col").forEach(btn => {
-    btn.addEventListener("click", () => { const ti = parseInt(btn.dataset.ti); const schema = getSchema(); if (schema[ti]) { schema[ti].columns.push(`컬럼${schema[ti].columns.length + 1}`); setSchema(schema); refreshPanel(); bindSettingsEvents(); } });
+    btn.addEventListener("click", () => { const ti = parseInt(btn.dataset.ti); const schema = getSchema(); if (schema[ti]) { schema[ti].columns.push(`Column${schema[ti].columns.length + 1}`); setSchema(schema); refreshPanel(); bindSettingsEvents(); } });
   });
 
   document.querySelectorAll(".fab-schema-del-col").forEach(btn => {
     btn.addEventListener("click", () => { const ti = parseInt(btn.dataset.ti), ci = parseInt(btn.dataset.ci); const schema = getSchema(); if (schema[ti] && schema[ti].columns.length > 1) { schema[ti].columns.splice(ci, 1); setSchema(schema); refreshPanel(); bindSettingsEvents(); } });
+  });
+
+  // JSON Import
+  const jsonApply = document.getElementById("fab-json-apply");
+  if (jsonApply) jsonApply.addEventListener("click", () => {
+    const input = document.getElementById("fab-json-input");
+    const statusEl = document.getElementById("fab-json-status");
+    const raw = (input?.value || "").trim();
+    if (!raw) { statusEl.innerHTML = '<span class="fab-gen-err">JSON을 입력해주세요.</span>'; return; }
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error("최상위가 배열이어야 합니다.");
+      for (let i = 0; i < parsed.length; i++) {
+        if (!parsed[i].name || !Array.isArray(parsed[i].columns)) throw new Error(`항목 ${i}: name(문자열)과 columns(배열)이 필요합니다.`);
+        if (parsed[i].columns.length === 0) throw new Error(`항목 ${i}: 최소 1개의 컬럼이 필요합니다.`);
+      }
+
+      if (!confirm(`${parsed.length}개의 테이블로 스키마를 교체합니다. 기존 스키마가 덮어쓰여집니다. 계속하시겠습니까?`)) return;
+
+      const newSchema = parsed.map(t => ({ name: String(t.name), columns: t.columns.map(c => String(c)) }));
+      const s = getSettings();
+      s.schema = newSchema;
+      s.injectTables = {};
+      for (let i = 0; i < newSchema.length; i++) s.injectTables[i] = true;
+      saveSettings();
+      getTables(); saveTables(); injectPrompt(); updateExtSlot();
+      statusEl.innerHTML = `<span class="fab-gen-ok">✅ ${newSchema.length}개 테이블로 스키마가 교체되었습니다.</span>`;
+      refreshPanel(); bindSettingsEvents();
+    } catch (e) {
+      statusEl.innerHTML = `<span class="fab-gen-err">JSON 파싱 오류: ${e.message}</span>`;
+    }
+  });
+
+  const jsonExport = document.getElementById("fab-json-export");
+  if (jsonExport) jsonExport.addEventListener("click", () => {
+    const input = document.getElementById("fab-json-input");
+    if (input) input.value = JSON.stringify(getSchema(), null, 2);
+  });
+}
+
+// ============================================================
+// BIND OVERVIEW EVENTS
+// ============================================================
+
+function bindOverviewEvents() {
+  document.querySelectorAll(".fab-table-header").forEach(header => {
+    header.addEventListener("click", () => {
+      const idx = header.dataset.idx;
+      const body = document.querySelector(`.fab-table-body[data-idx="${idx}"]`);
+      const arrow = header.querySelector(".fab-table-arrow");
+      if (body) {
+        const open = body.style.display !== "none";
+        body.style.display = open ? "none" : "block";
+        if (arrow) arrow.textContent = open ? "▸" : "▾";
+      }
+    });
   });
 }
 
@@ -378,10 +649,7 @@ function bindSettingsEvents() {
 
 function createExtSlot() {
   const container = document.getElementById("extensions_settings2");
-  if (!container) {
-    console.warn("[FAB] Extensions settings container not found. Slot skipped.");
-    return;
-  }
+  if (!container) { console.warn("[FAB] Extensions container not found."); return; }
 
   const wrapper = document.createElement("div");
   wrapper.id = "fab-ext-slot";
@@ -401,117 +669,72 @@ function createExtSlot() {
         </div>
         <hr>
         <div class="fab-ext-quick">
-          <label class="checkbox_label">
-            <input type="checkbox" id="fab-ext-chk-hide">
-            <span>채팅에서 <tableEdit> 숨기기</span>
-          </label>
-          <label class="checkbox_label">
-            <input type="checkbox" id="fab-ext-chk-inject">
-            <span>AI에 테이블 데이터 전달</span>
-          </label>
+          <label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-hide"><span>채팅에서 <tableEdit> 숨기기</span></label>
+          <label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-inject"><span>AI에 테이블 데이터 전달</span></label>
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 
   container.appendChild(wrapper);
 
-  // Toggle drawer
   wrapper.querySelector(".inline-drawer-toggle").addEventListener("click", function () {
     const content = wrapper.querySelector(".inline-drawer-content");
     const arrow = wrapper.querySelector(".inline-drawer-icon.down");
     const isOpen = content.style.display !== "none";
     content.style.display = isOpen ? "none" : "block";
-    if (arrow) arrow.classList.toggle("fa-circle-chevron-down", isOpen);
-    if (arrow) arrow.classList.toggle("fa-circle-chevron-up", !isOpen);
+    if (arrow) { arrow.classList.toggle("fa-circle-chevron-down", isOpen); arrow.classList.toggle("fa-circle-chevron-up", !isOpen); }
   });
 
-  // Open panel
-  document.getElementById("fab-ext-btn-open").addEventListener("click", () => {
-    if (!panelOpen) togglePanel();
-  });
-
-  // Rescan
+  document.getElementById("fab-ext-btn-open").addEventListener("click", () => { if (!panelOpen) togglePanel(); });
   document.getElementById("fab-ext-btn-scan").addEventListener("click", scanAll);
 
-  // Quick toggles
   const hideChk = document.getElementById("fab-ext-chk-hide");
   hideChk.checked = getSettings().hideTableEdit;
-  hideChk.addEventListener("change", () => {
-    getSettings().hideTableEdit = hideChk.checked;
-    saveSettings();
-  });
+  hideChk.addEventListener("change", () => { getSettings().hideTableEdit = hideChk.checked; saveSettings(); });
 
   const injectChk = document.getElementById("fab-ext-chk-inject");
   injectChk.checked = getSettings().injectEnabled;
-  injectChk.addEventListener("change", () => {
-    getSettings().injectEnabled = injectChk.checked;
-    saveSettings();
-    updateExtSlot();
-  });
+  injectChk.addEventListener("change", () => { getSettings().injectEnabled = injectChk.checked; saveSettings(); updateExtSlot(); });
 
   updateExtSlot();
 }
 
 function updateExtSlot() {
-  const statusEl = document.getElementById("fab-ext-status");
-  if (!statusEl) return;
-
-  const settings = getSettings();
-  const schema = settings.schema;
-  const tables = getTables();
+  const statusEl = document.getElementById("fab-ext-status"); if (!statusEl) return;
+  const settings = getSettings(); const schema = settings.schema; const tables = getTables();
   const totalRows = Object.values(tables).reduce((sum, t) => sum + (t.rows?.length || 0), 0);
   const enabledCount = Object.values(settings.injectTables).filter(v => v).length;
-
   statusEl.innerHTML = `
     <div class="fab-ext-row"><span>테이블</span><span>${schema.length}개 (${totalRows}행)</span></div>
-    <div class="fab-ext-row"><span>AI 참조</span><span style="color:${settings.injectEnabled ? "#66bb6a" : "#ef5350"}">${settings.injectEnabled ? `✅ ON (${enabledCount}/${schema.length})` : "❌ OFF"}</span></div>
-    <div class="fab-ext-row"><span>삽입 깊이</span><span>${settings.injectDepth}</span></div>
-  `;
-
-  // Sync quick toggles
-  const hideChk = document.getElementById("fab-ext-chk-hide");
-  if (hideChk) hideChk.checked = settings.hideTableEdit;
-  const injectChk = document.getElementById("fab-ext-chk-inject");
-  if (injectChk) injectChk.checked = settings.injectEnabled;
+    <div class="fab-ext-row"><span>AI 참조</span><span style="color:${settings.injectEnabled ? "#66bb6a" : "#ef5350"}">${settings.injectEnabled ? `ON (${enabledCount}/${schema.length})` : "OFF"}</span></div>`;
+  const hideChk = document.getElementById("fab-ext-chk-hide"); if (hideChk) hideChk.checked = settings.hideTableEdit;
+  const injectChk = document.getElementById("fab-ext-chk-inject"); if (injectChk) injectChk.checked = settings.injectEnabled;
 }
 
 // ============================================================
-// WAND MENU (EXTENSIONS ACTION)
+// WAND MENU
 // ============================================================
 
 function registerWandAction() {
-  const wandContainer = document.getElementById("extensionsMenu");
-  if (!wandContainer) {
-    // Fallback: try to listen for wand menu creation
-    const observer = new MutationObserver((mutations, obs) => {
-      const wand = document.getElementById("extensionsMenu");
-      if (wand) {
-        obs.disconnect();
-        addWandButton(wand);
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    return;
-  }
-  addWandButton(wandContainer);
+  const wand = document.getElementById("extensionsMenu");
+  if (wand) { addWandButton(wand); return; }
+  const observer = new MutationObserver((_, obs) => {
+    const w = document.getElementById("extensionsMenu");
+    if (w) { obs.disconnect(); addWandButton(w); }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function addWandButton(container) {
-  // Avoid duplicates
   if (document.getElementById("fab-wand-btn")) return;
-
   const btn = document.createElement("div");
   btn.id = "fab-wand-btn";
   btn.classList.add("list-group-item", "flex-container", "flexGap5");
   btn.innerHTML = `<span class="fa-solid fa-diamond" style="color:#c9b3ff"></span> FAB 시트 열기`;
   btn.addEventListener("click", () => {
     if (!panelOpen) togglePanel();
-    // Close wand menu
-    const menu = btn.closest(".openDrawer, #extensionsMenu");
-    if (menu) menu.classList.remove("openDrawer");
+    const menu = btn.closest(".openDrawer, #extensionsMenu"); if (menu) menu.classList.remove("openDrawer");
   });
-
   container.appendChild(btn);
 }
 
@@ -519,34 +742,29 @@ function addWandButton(container) {
 // PANEL
 // ============================================================
 
-let currentTab = "status";
+let currentTab = "overview";
 let panelOpen = false;
 
 function applyPanelWidth() {
-  const panel = document.getElementById("fab-panel");
-  if (!panel) return;
+  const panel = document.getElementById("fab-panel"); if (!panel) return;
   const w = getSettings().panelWidth || 400;
   panel.style.width = w + "px";
   panel.style.right = panelOpen ? "0" : `-${w + 20}px`;
 }
 
 function createUI() {
-  // Floating toggle button
   const btn = document.createElement("div");
-  btn.id = "fab-btn"; btn.innerHTML = "⟐"; btn.title = "Flow & Brand 시트";
+  btn.id = "fab-btn"; btn.innerHTML = "⟐"; btn.title = "Flow & Brand Sheet";
   document.body.appendChild(btn);
 
-  // Side panel
   const panel = document.createElement("div");
   panel.id = "fab-panel";
   panel.innerHTML = `
     <div class="fab-ph"><div class="fab-pt">⟐ Flow & Brand ⟐</div><div class="fab-pa"><button id="fab-rescan" class="fab-ab2" title="전체 재스캔">↻</button><button id="fab-close" class="fab-ab2" title="닫기">✕</button></div></div>
     <div class="fab-tabs">
-      <button class="fab-tab active" data-tab="status">상태</button>
-      <button class="fab-tab" data-tab="character">캐릭터</button>
-      <button class="fab-tab" data-tab="inventory">소지품</button>
-      <button class="fab-tab" data-tab="missions">임무</button>
+      <button class="fab-tab active" data-tab="overview">개요</button>
       <button class="fab-tab" data-tab="raw">원본</button>
+      <button class="fab-tab" data-tab="generate">AI</button>
       <button class="fab-tab" data-tab="settings">⚙</button>
     </div>
     <div id="fab-content" class="fab-ct"></div>
@@ -562,7 +780,10 @@ function createUI() {
     tab.addEventListener("click", () => {
       panel.querySelectorAll(".fab-tab").forEach(t => t.classList.remove("active"));
       tab.classList.add("active"); currentTab = tab.dataset.tab;
-      refreshPanel(); if (currentTab === "settings") bindSettingsEvents();
+      refreshPanel();
+      if (currentTab === "settings") bindSettingsEvents();
+      if (currentTab === "generate") bindGenerateEvents();
+      if (currentTab === "overview") bindOverviewEvents();
     });
   });
 }
@@ -572,18 +793,21 @@ function togglePanel() {
   const w = getSettings().panelWidth || 400;
   const panel = document.getElementById("fab-panel");
   if (panel) panel.style.right = panelOpen ? "0" : `-${w + 20}px`;
-  if (panelOpen) { refreshPanel(); if (currentTab === "settings") bindSettingsEvents(); }
+  if (panelOpen) {
+    refreshPanel();
+    if (currentTab === "settings") bindSettingsEvents();
+    if (currentTab === "generate") bindGenerateEvents();
+    if (currentTab === "overview") bindOverviewEvents();
+  }
 }
 
 function refreshPanel() {
   const el = document.getElementById("fab-content"); if (!el) return;
   switch (currentTab) {
-    case "character": el.innerHTML = renderCharacter(); break;
-    case "inventory": el.innerHTML = renderInventory(); break;
-    case "missions": el.innerHTML = renderMissions(); break;
-    case "status": el.innerHTML = renderStatus(); break;
+    case "overview": el.innerHTML = renderOverview(); bindOverviewEvents(); break;
     case "raw": el.innerHTML = renderRaw(); break;
-    case "settings": el.innerHTML = renderSettings(); break;
+    case "generate": el.innerHTML = renderGenerate(); bindGenerateEvents(); break;
+    case "settings": el.innerHTML = renderSettings(); bindSettingsEvents(); break;
   }
 }
 
@@ -601,5 +825,5 @@ jQuery(async () => {
   eventSource.on(event_types.MESSAGE_EDITED, () => { scanAll(); setTimeout(hideBlocks, 300); });
   eventSource.on(event_types.CHAT_CHANGED, () => { setTimeout(() => { scanAll(); hideBlocks(); }, 1000); });
   setTimeout(() => { scanAll(); hideBlocks(); }, 2000);
-  console.log(`[FAB] ${EXT_DISPLAY} v1.3 loaded.`);
+  console.log(`[FAB] ${EXT_DISPLAY} v2.0 loaded.`);
 });
