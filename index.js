@@ -1219,44 +1219,157 @@ function updateExtSlot() {
 }
 
 // ============================================================
-// WAND
+// WAND — 요술봉 메뉴 (재생성 대응)
 // ============================================================
 
 function registerWandAction() {
-  const wand = document.getElementById("extensionsMenu");
-  if (wand) { addWandButton(wand); return; }
-  const obs = new MutationObserver((_, o) => { const w = document.getElementById("extensionsMenu"); if (w) { o.disconnect(); addWandButton(w); } });
+  // 방법 1: 요술봉 메뉴가 열릴 때마다 버튼 주입
+  // SillyTavern은 요술봉 클릭 시 매번 팝오버를 새로 그림
+  const WAND_SELECTORS = [
+    "#extensionsMenu",
+    "#extensions_wand_container",
+    ".extensions_block .list-group",
+  ];
+
+  function tryInjectWand() {
+    for (const sel of WAND_SELECTORS) {
+      const container = document.querySelector(sel);
+      if (container && !document.getElementById("fab-wand-btn")) {
+        addWandButton(container);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 초기 시도
+  if (tryInjectWand()) return;
+
+  // 팝오버가 동적 생성될 때마다 재주입 (disconnect 안 함)
+  const obs = new MutationObserver(() => {
+    tryInjectWand();
+  });
   obs.observe(document.body, { childList: true, subtree: true });
 }
-function addWandButton(c) {
+
+function addWandButton(container) {
   if (document.getElementById("fab-wand-btn")) return;
-  const b = document.createElement("div"); b.id = "fab-wand-btn"; b.classList.add("list-group-item", "flex-container", "flexGap5");
-  b.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent)"></span> FAB 시트`;
-  b.addEventListener("click", () => { if (!panelOpen) togglePanel(); }); c.appendChild(b);
+  const btn = document.createElement("div");
+  btn.id = "fab-wand-btn";
+  btn.classList.add("list-group-item", "flex-container", "flexGap5");
+  btn.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent, #6c5ce7)"></span> FAB 시트`;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!panelOpen) togglePanel();
+    // 요술봉 팝오버 닫기 시도
+    const popup = container.closest(".popup, .tooltip, [data-popper-placement]");
+    if (popup) popup.remove();
+  });
+  container.appendChild(btn);
 }
 
 // ============================================================
-// PANEL
+// EXT SLOT — 확장 설정 패널 (다중 컨테이너 탐색)
 // ============================================================
 
-let currentTab = "overview",
-  panelOpen = false,
-  rawMode = false;
+function createExtSlot() {
+  const SETTINGS_SELECTORS = [
+    "#extensions_settings2",
+    "#extensions_settings",
+    "#extensions-settings-panel",
+    ".extensions_block",
+  ];
 
-function applyPanelWidth() {
-  const panel = document.getElementById("fab-panel");
-  if (!panel) return;
-  const w = getSettings().panelWidth || 440;
-  panel.style.width = w + "px";
-  panel.style.right = panelOpen ? "0" : `-${w + 20}px`;
+  let container = null;
+  for (const sel of SETTINGS_SELECTORS) {
+    container = document.querySelector(sel);
+    if (container) break;
+  }
+
+  if (!container) {
+    // 컨테이너를 못 찾으면 지연 재시도
+    console.warn("[FAB] Extension settings container not found. Retrying in 3s...");
+    setTimeout(createExtSlot, 3000);
+    return;
+  }
+
+  // 중복 방지
+  if (document.getElementById("fab-ext-slot")) {
+    updateExtSlot();
+    return;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.id = "fab-ext-slot";
+  wrapper.classList.add("extension_container");
+  wrapper.innerHTML = `<div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+      <div class="inline-drawer-icon fa-solid fa-diamond" style="color:var(--fab-accent, #6c5ce7)"></div>
+      <span class="inline-drawer-title">${EXT_DISPLAY}</span>
+      <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content" style="display:none">
+      <div id="fab-ext-status" class="fab-ext-info"></div>
+      <div class="fab-ext-actions">
+        <input id="fab-ext-btn-open" class="menu_button" type="button" value="📋 시트">
+        <input id="fab-ext-btn-scan" class="menu_button" type="button" value="↻ 재스캔">
+      </div><hr>
+      <div class="fab-ext-quick">
+        <label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-hide"><span><tableEdit> 숨기기</span></label>
+        <label class="checkbox_label"><input type="checkbox" id="fab-ext-chk-inject"><span>AI에 데이터 전달</span></label>
+      </div>
+    </div>
+  </div>`;
+  container.appendChild(wrapper);
+
+  // 드로어 토글
+  wrapper.querySelector(".inline-drawer-toggle").addEventListener("click", function () {
+    const content = wrapper.querySelector(".inline-drawer-content");
+    const arrow = wrapper.querySelector(".inline-drawer-icon.down");
+    const isOpen = content.style.display !== "none";
+    content.style.display = isOpen ? "none" : "block";
+    if (arrow) {
+      arrow.classList.toggle("fa-circle-chevron-down", isOpen);
+      arrow.classList.toggle("fa-circle-chevron-up", !isOpen);
+    }
+  });
+
+  document.getElementById("fab-ext-btn-open").addEventListener("click", () => {
+    if (!panelOpen) togglePanel();
+  });
+  document.getElementById("fab-ext-btn-scan").addEventListener("click", scanAll);
+
+  const hideChk = document.getElementById("fab-ext-chk-hide");
+  hideChk.checked = getSettings().hideTableEdit;
+  hideChk.addEventListener("change", () => {
+    getSettings().hideTableEdit = hideChk.checked;
+    saveSettings();
+  });
+
+  const injectChk = document.getElementById("fab-ext-chk-inject");
+  injectChk.checked = getSettings().injectEnabled;
+  injectChk.addEventListener("change", () => {
+    getSettings().injectEnabled = injectChk.checked;
+    saveSettings();
+    updateExtSlot();
+  });
+
+  updateExtSlot();
 }
+
+// ============================================================
+// FLOATING BUTTON — 가시성 보장
+// ============================================================
 
 function createUI() {
+  // 플로팅 버튼
   const btn = document.createElement("div");
   btn.id = "fab-btn";
   btn.innerHTML = "⟐";
   btn.title = "FAB Sheet";
   document.body.appendChild(btn);
+
+  // 패널
   const panel = document.createElement("div");
   panel.id = "fab-panel";
   panel.innerHTML = `<div class="fab-ph"><div class="fab-pt">⟐ Flow & Brand ⟐</div><div class="fab-pa">
@@ -1268,6 +1381,7 @@ function createUI() {
   document.body.appendChild(panel);
   applyPanelWidth();
   setupDelegation();
+
   btn.addEventListener("click", togglePanel);
   document.getElementById("fab-close").addEventListener("click", togglePanel);
   document.getElementById("fab-rescan").addEventListener("click", scanAll);
@@ -1279,12 +1393,13 @@ function createUI() {
       panel.querySelectorAll(".fab-tab").forEach((t) => t.classList.remove("active"));
     } else {
       currentTab = "overview";
-      panel
-        .querySelectorAll(".fab-tab")
-        .forEach((t) => t.classList.toggle("active", t.dataset.tab === "overview"));
+      panel.querySelectorAll(".fab-tab").forEach((t) =>
+        t.classList.toggle("active", t.dataset.tab === "overview")
+      );
     }
     refreshPanel();
   });
+
   panel.querySelectorAll(".fab-tab").forEach((tab) =>
     tab.addEventListener("click", () => {
       rawMode = false;
@@ -1295,44 +1410,69 @@ function createUI() {
       refreshPanel();
     })
   );
+
+  // 플로팅 버튼 가시성 재확인 (다른 확장이 z-index를 덮을 수 있으므로)
+  ensureFloatingButtonVisible();
 }
 
-function togglePanel() {
-  panelOpen = !panelOpen;
-  const w = getSettings().panelWidth || 440;
-  const p = document.getElementById("fab-panel");
-  if (p) p.style.right = panelOpen ? "0" : `-${w + 20}px`;
-  if (panelOpen) refreshPanel();
-}
+function ensureFloatingButtonVisible() {
+  const btn = document.getElementById("fab-btn");
+  if (!btn) return;
 
-function refreshPanel() {
-  const el = document.getElementById("fab-content");
-  if (!el) return;
-  switch (currentTab) {
-    case "overview":
-      el.innerHTML = renderOverview();
-      break;
-    case "raw":
-      el.innerHTML = renderRaw();
-      break;
-    case "generate":
-      el.innerHTML = renderGenerate();
-      break;
-    case "settings":
-      el.innerHTML = renderSettings();
-      break;
-  }
+  // 다른 고정 요소와 겹치는지 확인하고 위치 조정
+  const checkOverlap = () => {
+    const rect = btn.getBoundingClientRect();
+    const elemAtPoint = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    if (elemAtPoint && elemAtPoint !== btn && !btn.contains(elemAtPoint)) {
+      // 위로 이동
+      const currentBottom = parseInt(getComputedStyle(btn).bottom) || 80;
+      btn.style.bottom = (currentBottom + 50) + "px";
+    }
+  };
+  setTimeout(checkOverlap, 3000);
 }
 
 // ============================================================
-// INIT
+// INIT — 수정된 초기화
 // ============================================================
 
 jQuery(async () => {
   createUI();
-  createExtSlot();
+
+  // 확장 설정 슬롯: DOM 준비 대기 후 생성
+  const waitForSettings = () => {
+    const selectors = [
+      "#extensions_settings2",
+      "#extensions_settings",
+      ".extensions_block",
+    ];
+    for (const sel of selectors) {
+      if (document.querySelector(sel)) return true;
+    }
+    return false;
+  };
+
+  if (waitForSettings()) {
+    createExtSlot();
+  } else {
+    // DOM이 아직 준비 안 된 경우 대기
+    const settingsObs = new MutationObserver((_, obs) => {
+      if (waitForSettings()) {
+        obs.disconnect();
+        createExtSlot();
+      }
+    });
+    settingsObs.observe(document.body, { childList: true, subtree: true });
+    // 안전 타임아웃
+    setTimeout(() => {
+      settingsObs.disconnect();
+      createExtSlot();
+    }, 10000);
+  }
+
   registerWandAction();
   applyColors();
+
   eventSource.on(event_types.GENERATION_STARTED, () => injectPrompt());
   eventSource.on(event_types.MESSAGE_RECEIVED, (idx) => {
     const ctx = getContext();
@@ -1350,9 +1490,11 @@ jQuery(async () => {
       hideBlocks();
     }, 1000)
   );
+
   setTimeout(() => {
     scanAll();
     hideBlocks();
   }, 2000);
-  console.log(`[FAB] ${EXT_DISPLAY} v5.0 loaded.`);
+
+  console.log(`[FAB] ${EXT_DISPLAY} v5.1 loaded.`);
 });
