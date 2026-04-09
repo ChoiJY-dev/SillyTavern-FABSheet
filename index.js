@@ -1224,31 +1224,16 @@ function updateExtSlot() {
 
 function registerWandAction() {
   const wand = document.getElementById("extensionsMenu");
-  if (wand) {
-    addWandButton(wand);
-    return;
-  }
-  const obs = new MutationObserver((_, o) => {
-    const w = document.getElementById("extensionsMenu");
-    if (w) {
-      o.disconnect();
-      addWandButton(w);
-    }
-  });
+  if (wand) { addWandButton(wand); return; }
+  const obs = new MutationObserver((_, o) => { const w = document.getElementById("extensionsMenu"); if (w) { o.disconnect(); addWandButton(w); } });
   obs.observe(document.body, { childList: true, subtree: true });
 }
 function addWandButton(c) {
   if (document.getElementById("fab-wand-btn")) return;
-  const b = document.createElement("div");
-  b.id = "fab-wand-btn";
-  b.classList.add("list-group-item", "flex-container", "flexGap5");
+  const b = document.createElement("div"); b.id = "fab-wand-btn"; b.classList.add("list-group-item", "flex-container", "flexGap5");
   b.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent)"></span> FAB 시트`;
-  b.addEventListener("click", () => {
-    if (!panelOpen) togglePanel();
-  });
-  c.appendChild(b);
+  b.addEventListener("click", () => { if (!panelOpen) togglePanel(); }); c.appendChild(b);
 }
-
 
 // ============================================================
 // PANEL
