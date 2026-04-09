@@ -1218,35 +1218,50 @@ function updateExtSlot() {
   if (i) i.checked = settings.injectEnabled;
 }
 
-// ============================================================
-// WAND
+/// ============================================================
+// WAND — 수정
 // ============================================================
 
 function registerWandAction() {
-  const wand = document.getElementById("extensionsMenu");
-  if (wand) {
-    addWandButton(wand);
-    return;
-  }
-  const obs = new MutationObserver((_, o) => {
-    const w = document.getElementById("extensionsMenu");
-    if (w) {
-      o.disconnect();
-      addWandButton(w);
+  // 요술봉 메뉴가 열릴 때마다 버튼 존재 여부를 확인하고 재삽입
+  const observer = new MutationObserver(() => {
+    const menu = document.getElementById("extensionsMenu");
+    if (menu && menu.style.display !== "none") {
+      addWandButton(menu);
     }
   });
-  obs.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+
+  // 즉시 시도도 한 번
+  const menu = document.getElementById("extensionsMenu");
+  if (menu) addWandButton(menu);
 }
-function addWandButton(c) {
-  if (document.getElementById("fab-wand-btn")) return;
-  const b = document.createElement("div");
-  b.id = "fab-wand-btn";
-  b.classList.add("list-group-item", "flex-container", "flexGap5");
-  b.innerHTML = `<span class="fa-solid fa-diamond" style="color:var(--fab-accent)"></span> FAB 시트`;
-  b.addEventListener("click", () => {
+
+function addWandButton(menu) {
+  // 이미 있으면 스킵
+  if (menu.querySelector("#fab-wand-container")) return;
+
+  // extension_container wrapper로 감싸기
+  const container = document.createElement("div");
+  container.id = "fab-wand-container";
+  container.classList.add("extension_container", "interactable");
+  container.tabIndex = 0;
+
+  const item = document.createElement("div");
+  item.id = "fab-wand-btn";
+  item.classList.add("list-group-item", "flex-container", "flexGap5", "interactable");
+  item.tabIndex = 0;
+  item.setAttribute("role", "listitem");
+  item.innerHTML = `<div class="fa-solid fa-diamond fa-fw extensionsMenuExtensionButton" style="color:var(--fab-accent)"></div><span>FAB 시트</span>`;
+
+  item.addEventListener("click", () => {
     if (!panelOpen) togglePanel();
   });
-  c.appendChild(b);
+
+  container.appendChild(item);
+  menu.appendChild(container);
+}
+
 }
 
 // ============================================================
