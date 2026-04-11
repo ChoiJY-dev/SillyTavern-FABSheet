@@ -182,7 +182,7 @@ async function aiGenerate(instruction, mode) {
     if (text) chat += `[${msg.is_user ? "User" : "Char"}]: ${text.substring(0,600)}\n`;
   }
   const sys = mode === "setup"
-    ? `Data assistant. Analyze chat history and populate ALL tables with accurate data.\n\nSchema:\n${data}\nRecent Chat:\n${chat||"(none)"}\n\nRULES:\n- Output ONLY <tableEdit> block. Nothing else.\n- T0: scene info.\n- T1: one row per character (인물/외형/성격/기타). No 능력치 here.\n- T2: one row per stat per character. Col 0=인물, Col 1=능력치명, Col 2=수치 (e.g. "네이","COR","4").\n- T3: one row per DIRECTED relationship pair. Col 0=source character, Col 1=target character, Col 2=relationship label, Col 3=detail.\n- T4: one row per trait/spell/ability. Col 1 "분류"=특성|마법|능력. Col 2 "계열"=school/lineage. Col 3 "유형"=기본|확장|etc. Col 4 "이름". Col 5 "상세".\n- T5: one row per inventory item.\n- T6: one row per storyline entry. Col 1 "유형"=임무|전투.\n- Link ALL rows by Col 0 "인물" (exact name match).\n- NO empty rows. Be thorough — extract every character, relationship, trait, item, and plot point from the chat.`
+    ? `Data assistant. Analyze the chat history (and any worldbuilding/lore context embedded in it) to populate the tables.\n\nSchema:\n${data}\nRecent Chat:\n${chat||"(none)"}\n\nRULES:\n- Output ONLY <tableEdit> block. Nothing else.\n- T0: scene info.\n- T1: one row per character (인물/외형/성격/기타). No 능력치 here.\n- T2: ONLY fill if a numeric stat system is explicitly present in the chat or lore (e.g. stat names with numeric values like COR:4, STR 12, etc.). If no such system is mentioned, leave T2 completely empty. When filling: one row per stat per character. Col 0=인물, Col 1=능력치명, Col 2=수치 (e.g. "네이","COR","4").\n- T3: one row per DIRECTED relationship pair. Col 0=source character, Col 1=target character, Col 2=relationship label, Col 3=detail.\n- T4: one row per trait/spell/ability. Col 1 "분류"=특성|마법|능력. Col 2 "계열"=school/lineage. Col 3 "유형"=기본|확장|etc. Col 4 "이름". Col 5 "상세".\n- T5: one row per inventory item.\n- T6: one row per storyline entry. Col 1 "유형"=임무|전투.\n- Link ALL rows by Col 0 "인물" (exact name match).\n- NO empty rows. Be thorough — extract every character, relationship, trait, item, and plot point from the chat.`
     : `Data assistant. Generate table edit commands based on instruction.\n\nCurrent Schema+Data:\n${data}\n${chat ? `Recent Chat:\n${chat}` : ""}\n\nRULES:\n- Output ONLY <tableEdit> block.\n- T0=scene, T1=profile(인물/외형/성격/기타), T2=ability stats(one row per stat: 인물/능력치명/수치), T3=relationships(per directed pair), T4=traits/magic(분류→계열→유형→이름→상세), T5=inventory, T6=storyline(임무|전투).\n- Link by Col 0 "인물". NO empty rows.`;
   try { return await generateRaw(instruction,"",false,false,sys); }
   catch { try { return await generateRaw(sys+"\n\n"+instruction,""); } catch { return null; } }
@@ -521,8 +521,8 @@ function renderGenerate() {
   let h = "";
   if (!hasData) {
     h += `<div class="fab-card fab-setup-card"><div class="fab-ch">✨ 초기 셋업</div>
-      <div class="fab-setup-info">채팅 분석 → <strong>능력치 · 외형 · 성격 · 관계 · 특성/마법 · 소지품 · 스토리라인</strong> 자동 생성</div>
-      <textarea id="fab-setup-input" class="fab-gen-textarea" placeholder="채팅을 분석해서 시트를 채워줘" rows="3"></textarea>
+      <div class="fab-setup-info">채팅 · 세계관 분석 → <strong>외형 · 성격 · 관계 · 특성/마법 · 소지품 · 스토리라인</strong> 자동 생성<br><small style="opacity:0.75">능력치는 해당 세계에 수치형 스탯 시스템이 있는 경우에만 생성됩니다</small></div>
+      <textarea id="fab-setup-input" class="fab-gen-textarea" placeholder="채팅을 분석해서 시트를 채워줘&#10;(능력치 시스템이 있으면 기재해줘: 예) COR/SEN/VOL/COD 사용)" rows="3"></textarea>
       <div class="fab-gen-actions"><button class="fab-set-btn primary" data-action="ai-setup">✨ 초기 생성</button></div>
       <div id="fab-setup-status" class="fab-gen-status"></div><div id="fab-setup-preview" class="fab-gen-preview"></div></div>`;
   }
